@@ -13,8 +13,8 @@ This is **not** a port of `eve-rails-cli` or `eve-rails-cli-go`.
 ## Spec
 
 - Parent issue (`ready-for-agent`): https://github.com/DSamuelHodge/eve-fleet/issues/1
-- Frozen design: SRS v0.3.0 (Rounds 1–5 closed)
-- In-repo copy: [docs/SPEC.md](docs/SPEC.md)
+- Frozen design (SRS v0.3.0, Rounds 1–5 closed): [docs/SRS.md](docs/SRS.md)
+- Realization spec: [docs/SPEC.md](docs/SPEC.md)
 
 ## Shape (v1)
 
