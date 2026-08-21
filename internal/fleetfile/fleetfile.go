@@ -26,8 +26,9 @@ const (
 var (
 	dnsLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 	// SemVer 2.0.0 core + optional pre-release and build metadata.
-	semver = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$`)
-	gitSHA = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+	semver   = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$`)
+	gitSHA   = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+	edgeName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 )
 
 type Document struct {
@@ -193,6 +194,7 @@ func Validate(ctx context.Context, doc *Document, root string) []diag.Diagnostic
 	} else {
 		ds = append(ds, validateAgents(doc.Agents)...)
 	}
+	ds = append(ds, validateEdges(doc.Agents, doc.Edges)...)
 	rt := doc.Runtime
 	if rt == nil {
 		d := Defaults()
@@ -366,6 +368,116 @@ func ValidateSpec(name string, spec AgentSpec) []diag.Diagnostic {
 			`set role: parent or role: delegate`))
 	}
 	return ds
+}
+
+func ValidEdgeName(name string) bool {
+	return len(name) > 0 && len(name) <= 63 && edgeName.MatchString(name)
+}
+
+func ValidateEdges(agents map[string]AgentSpec, edges []EdgeSpec) []diag.Diagnostic {
+	return validateEdges(agents, edges)
+}
+
+func validateEdges(agents map[string]AgentSpec, edges []EdgeSpec) []diag.Diagnostic {
+	var ds []diag.Diagnostic
+	seen := map[string]int{}
+	for i, e := range edges {
+		base := fmt.Sprintf("edges[%d]", i)
+		if !ValidEdgeName(e.Name) {
+			ds = append(ds, diag.Error(base+".name", "edge.name",
+				"edge name must be lowercase letters, digits, and underscores",
+				"use a name like dedupe_lead"))
+		} else if prev, ok := seen[e.Name]; ok {
+			ds = append(ds, diag.Error(base+".name", "edge.name.unique",
+				fmt.Sprintf("edge name %q already used at edges[%d]", e.Name, prev),
+				"give each edge a unique name"))
+		} else {
+			seen[e.Name] = i
+		}
+		if strings.TrimSpace(e.Contract) == "" {
+			ds = append(ds, diag.Error(base+".contract", "edge.contract",
+				"edge contract is required free-text",
+				"set a contract describing the handoff"))
+		}
+		if !agentExists(agents, e.From) {
+			ds = append(ds, diag.Error(base+".from", "edge.endpoint",
+				fmt.Sprintf("from %q does not name an existing agent", e.From),
+				"set from to an agent declared in agents:"))
+		}
+		if !agentExists(agents, e.To) {
+			ds = append(ds, diag.Error(base+".to", "edge.endpoint",
+				fmt.Sprintf("to %q does not name an existing agent", e.To),
+				"set to to an agent declared in agents:"))
+		}
+	}
+	if cycle := findCycle(edges, agents); len(cycle) > 0 {
+		ds = append(ds, diag.Error("edges", "edge.cycle",
+			"edges form a cycle: "+strings.Join(cycle, " -> "),
+			"remove or reverse an edge so the graph is a DAG"))
+	}
+	return ds
+}
+
+func agentExists(agents map[string]AgentSpec, name string) bool {
+	if agents == nil {
+		return false
+	}
+	_, ok := agents[name]
+	return ok
+}
+
+func findCycle(edges []EdgeSpec, agents map[string]AgentSpec) []string {
+	adj := map[string][]string{}
+	for _, e := range edges {
+		if !agentExists(agents, e.From) || !agentExists(agents, e.To) {
+			continue
+		}
+		adj[e.From] = append(adj[e.From], e.To)
+	}
+	const (
+		white = 0
+		gray  = 1
+		black = 2
+	)
+	color := map[string]int{}
+	var stack []string
+	var cycle []string
+	var dfs func(string) bool
+	dfs = func(u string) bool {
+		color[u] = gray
+		stack = append(stack, u)
+		for _, v := range adj[u] {
+			switch color[v] {
+			case white:
+				if dfs(v) {
+					return true
+				}
+			case gray:
+				i := 0
+				for i < len(stack) && stack[i] != v {
+					i++
+				}
+				cycle = append(append([]string{}, stack[i:]...), v)
+				return true
+			}
+		}
+		stack = stack[:len(stack)-1]
+		color[u] = black
+		return false
+	}
+	names := make([]string, 0, len(agents))
+	for n := range agents {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		if color[n] == white {
+			if dfs(n) {
+				return cycle
+			}
+		}
+	}
+	return nil
 }
 
 func ScaffoldYAML(name string) []byte {
