@@ -67,7 +67,7 @@ func newRoot(g *globals) *cobra.Command {
 	cmd.AddCommand(newDeployCmd(g))
 	cmd.AddCommand(newReloadCmd(g))
 	cmd.AddCommand(newStatusCmd(g))
-	cmd.AddCommand(newStubCmd(g, "audit", "Reconstruct the accountability chain", "", groupInspect))
+	cmd.AddCommand(newAuditCmd(g))
 	return cmd
 }
 
