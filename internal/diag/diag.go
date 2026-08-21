@@ -19,6 +19,10 @@ func Error(path, rule, message, suggestion string) Diagnostic {
 	return Diagnostic{Path: path, Rule: rule, Level: "error", Message: message, Suggestion: suggestion}
 }
 
+func Note(path, rule, message, suggestion string) Diagnostic {
+	return Diagnostic{Path: path, Rule: rule, Level: "note", Message: message, Suggestion: suggestion}
+}
+
 func HasErrors(ds []Diagnostic) bool {
 	for _, d := range ds {
 		if d.Level == "error" {

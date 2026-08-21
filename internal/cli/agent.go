@@ -24,14 +24,16 @@ func newAgentCmd(g *globals) *cobra.Command {
 
 func newAgentAddCmd(g *globals) *cobra.Command {
 	var (
-		role        string
-		outcome     string
-		sla         string
-		completion  string
-		job         string
-		contract    string
-		model       string
-		description string
+		role            string
+		outcome         string
+		sla             string
+		completion      string
+		job             string
+		contract        string
+		model           string
+		description     string
+		approver        string
+		approvalTimeout string
 	)
 	cmd := &cobra.Command{
 		Use:   "add <name>",
@@ -50,7 +52,7 @@ func newAgentAddCmd(g *globals) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return g.runAgentAdd(args[0], role, outcome, sla, completion, job, contract, model, description)
+			return g.runAgentAdd(args[0], role, outcome, sla, completion, job, contract, model, description, approver, approvalTimeout)
 		},
 	}
 	cmd.Flags().StringVar(&role, "role", "", "parent or delegate")
@@ -61,10 +63,12 @@ func newAgentAddCmd(g *globals) *cobra.Command {
 	cmd.Flags().StringVar(&contract, "contract", "", "delegate contract")
 	cmd.Flags().StringVar(&model, "model", "", "optional model id")
 	cmd.Flags().StringVar(&description, "description", "", "optional description")
+	cmd.Flags().StringVar(&approver, "approver", "", `approver agent name or "human"`)
+	cmd.Flags().StringVar(&approvalTimeout, "approval-timeout", "", "optional approval timeout (e.g. 15m)")
 	return cmd
 }
 
-func (g *globals) runAgentAdd(name, role, outcome, sla, completion, job, contract, model, description string) error {
+func (g *globals) runAgentAdd(name, role, outcome, sla, completion, job, contract, model, description, approver, approvalTimeout string) error {
 	spec := fleetfile.AgentSpec{
 		Path:        fleetfile.AgentPath(name),
 		Role:        role,
@@ -77,6 +81,9 @@ func (g *globals) runAgentAdd(name, role, outcome, sla, completion, job, contrac
 			Job:        job,
 			Contract:   contract,
 		},
+	}
+	if approver != "" || approvalTimeout != "" {
+		spec.ApprovalPolicy = &fleetfile.ApprovalPolicy{Approver: approver, Timeout: approvalTimeout}
 	}
 	if ds := fleetfile.ValidateSpec(name, spec); len(ds) > 0 {
 		return g.report(diag.Report{OK: false, Diagnostics: ds})
@@ -128,6 +135,14 @@ func (g *globals) runAgentAdd(name, role, outcome, sla, completion, job, contrac
 					"remove agents until the fleet has 50 or fewer"),
 			},
 		})
+	}
+	pending := map[string]fleetfile.AgentSpec{}
+	for k, v := range doc.Agents {
+		pending[k] = v
+	}
+	pending[name] = spec
+	if ds := fleetfile.ValidateApproval(pending); diag.HasErrors(ds) {
+		return g.report(diag.Report{OK: false, Diagnostics: ds})
 	}
 	if err := scaffold.AgentTree(root, name, spec); err != nil {
 		if errors.Is(err, scaffold.ErrTreeExists) {

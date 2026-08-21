@@ -161,7 +161,7 @@ func ValidDNSLabel(name string) bool {
 	return dnsLabel.MatchString(name)
 }
 
-func Validate(ctx context.Context, doc *Document, root string) []diag.Diagnostic {
+func Validate(ctx context.Context, doc *Document, root string, raw []byte) []diag.Diagnostic {
 	var ds []diag.Diagnostic
 	if doc.APIVersion != APIVersion {
 		ds = append(ds, diag.Error("Fleetfile", "fleetfile.apiVersion",
@@ -193,8 +193,10 @@ func Validate(ctx context.Context, doc *Document, root string) []diag.Diagnostic
 			"remove agents until the fleet has 50 or fewer"))
 	} else {
 		ds = append(ds, validateAgents(doc.Agents)...)
+		ds = append(ds, validateApproval(doc.Agents)...)
 	}
 	ds = append(ds, validateEdges(doc.Agents, doc.Edges)...)
+	ds = append(ds, validateSecrets(raw)...)
 	rt := doc.Runtime
 	if rt == nil {
 		d := Defaults()
@@ -418,14 +420,6 @@ func validateEdges(agents map[string]AgentSpec, edges []EdgeSpec) []diag.Diagnos
 	return ds
 }
 
-func agentExists(agents map[string]AgentSpec, name string) bool {
-	if agents == nil {
-		return false
-	}
-	_, ok := agents[name]
-	return ok
-}
-
 func findCycle(edges []EdgeSpec, agents map[string]AgentSpec) []string {
 	adj := map[string][]string{}
 	for _, e := range edges {
@@ -478,6 +472,119 @@ func findCycle(edges []EdgeSpec, agents map[string]AgentSpec) []string {
 		}
 	}
 	return nil
+}
+
+func ValidateApproval(agents map[string]AgentSpec) []diag.Diagnostic {
+	return validateApproval(agents)
+}
+
+func validateApproval(agents map[string]AgentSpec) []diag.Diagnostic {
+	var ds []diag.Diagnostic
+	names := make([]string, 0, len(agents))
+	for name := range agents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		spec := agents[name]
+		if spec.ApprovalPolicy == nil {
+			continue
+		}
+		ds = append(ds, checkApprover("agents."+name+".approval_policy", spec.ApprovalPolicy.Approver, spec.ApprovalPolicy.Timeout, agents)...)
+		toolNames := make([]string, 0, len(spec.ApprovalPolicy.Tools))
+		for tn := range spec.ApprovalPolicy.Tools {
+			toolNames = append(toolNames, tn)
+		}
+		sort.Strings(toolNames)
+		for _, tn := range toolNames {
+			ta := spec.ApprovalPolicy.Tools[tn]
+			ds = append(ds, checkApprover("agents."+name+".approval_policy.tools."+tn, ta.Approver, ta.Timeout, agents)...)
+		}
+	}
+	return ds
+}
+
+func checkApprover(path, approver, timeout string, agents map[string]AgentSpec) []diag.Diagnostic {
+	var ds []diag.Diagnostic
+	if approver == "" {
+		ds = append(ds, diag.Error(path+".approver", "approval.approver",
+			"approver is required when approval_policy is set",
+			`set approver to an agent name or "human"`))
+	} else if approver != "human" && !agentExists(agents, approver) {
+		ds = append(ds, diag.Error(path+".approver", "approval.approver",
+			fmt.Sprintf("approver %q is not an agent in this fleet or \"human\"", approver),
+			`set approver to an existing agent name or "human"`))
+	} else if approver == "human" {
+		ds = append(ds, diag.Note(path+".approver", "approval.human",
+			`"human" is a non-blocking v1 approver (audit note only)`,
+			"keep using a named agent if you need a blocking approver"))
+	}
+	if timeout != "" {
+		if _, err := time.ParseDuration(timeout); err != nil {
+			ds = append(ds, diag.Error(path+".timeout", "approval.timeout",
+				"timeout must be a Go duration such as 15m or 1h",
+				`set timeout: "15m"`))
+		}
+	}
+	return ds
+}
+
+var secretKey = regexp.MustCompile(`(?i)(?:^|[_-])(password|passwd|secret|token|api[_-]?key|private[_-]?key|credential|credentials|auth)(?:$|[_-])`)
+
+func validateSecrets(raw []byte) []diag.Diagnostic {
+	if len(raw) == 0 {
+		return []diag.Diagnostic{diag.Error("Fleetfile", "fleetfile.secret.scan",
+			"Fleetfile bytes unavailable for secret scan",
+			"re-run doctor after saving the Fleetfile")}
+	}
+	var node yaml.Node
+	if err := yaml.Unmarshal(raw, &node); err != nil {
+		return []diag.Diagnostic{diag.Error("Fleetfile", "fleetfile.parse",
+			err.Error(),
+			"fix YAML syntax in Fleetfile")}
+	}
+	var ds []diag.Diagnostic
+	walkSecrets(&node, "", &ds)
+	return ds
+}
+
+func walkSecrets(n *yaml.Node, path string, ds *[]diag.Diagnostic) {
+	if n == nil {
+		return
+	}
+	switch n.Kind {
+	case yaml.DocumentNode:
+		for _, c := range n.Content {
+			walkSecrets(c, path, ds)
+		}
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k, v := n.Content[i], n.Content[i+1]
+			key := k.Value
+			child := key
+			if path != "" {
+				child = path + "." + key
+			}
+			if secretKey.MatchString(key) {
+				*ds = append(*ds, diag.Error(child, "fleetfile.secret",
+					"Fleetfile must not hold secrets",
+					"move the secret to the environment or a connection store, not the Fleetfile"))
+			}
+			walkSecrets(v, child, ds)
+		}
+	case yaml.SequenceNode:
+		for i, c := range n.Content {
+			walkSecrets(c, fmt.Sprintf("%s[%d]", path, i), ds)
+		}
+	}
+}
+
+func agentExists(agents map[string]AgentSpec, name string) bool {
+	if agents == nil || name == "" {
+		return false
+	}
+	_, ok := agents[name]
+	return ok
 }
 
 func ScaffoldYAML(name string) []byte {

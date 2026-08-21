@@ -36,7 +36,7 @@ func (g *globals) runDoctor(ctx context.Context) error {
 			},
 		})
 	}
-	doc, _, err := fleetfile.Load(root)
+	doc, raw, err := fleetfile.Load(root)
 	if err != nil {
 		return g.report(diag.Report{
 			OK: false,
@@ -49,7 +49,7 @@ func (g *globals) runDoctor(ctx context.Context) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, fleetfile.GitTimeout)
 	defer cancel()
-	ds := fleetfile.Validate(ctx, doc, root)
+	ds := fleetfile.Validate(ctx, doc, root, raw)
 	ok := !diag.HasErrors(ds)
 	sha, _ := fleetfile.RevParse(ctx, root)
 	plain := "ok"
