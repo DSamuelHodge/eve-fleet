@@ -8,11 +8,13 @@ import (
 	"path/filepath"
 
 	"github.com/DSamuelHodge/eve-fleet/internal/diag"
+	ex "github.com/DSamuelHodge/eve-fleet/internal/example"
 	"github.com/DSamuelHodge/eve-fleet/internal/fleetfile"
 	"github.com/spf13/cobra"
 )
 
 func newInitCmd(g *globals) *cobra.Command {
+	var example string
 	cmd := &cobra.Command{
 		Use:     "init <name>",
 		Short:   "Scaffold a fleet repository, Fleetfile, and git",
@@ -31,13 +33,14 @@ func newInitCmd(g *globals) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return g.runInit(cmd.Context(), args[0])
+			return g.runInit(cmd.Context(), args[0], example)
 		},
 	}
+	cmd.Flags().StringVar(&example, "example", "", "named example fleet (revenue-ops)")
 	return cmd
 }
 
-func (g *globals) runInit(ctx context.Context, name string) error {
+func (g *globals) runInit(ctx context.Context, name, example string) error {
 	if !fleetfile.ValidDNSLabel(name) {
 		return g.report(diag.Report{
 			OK: false,
@@ -91,6 +94,20 @@ func (g *globals) runInit(ctx context.Context, name string) error {
 	if err := os.WriteFile(filepath.Join(root, fleetfile.FileName), fleetfile.ScaffoldYAML(name), 0o644); err != nil {
 		cleanup()
 		return err
+	}
+	if example != "" {
+		if example != "revenue-ops" {
+			cleanup()
+			return g.report(diag.Report{OK: false, Diagnostics: []diag.Diagnostic{
+				diag.Error(".", "init.example",
+					fmt.Sprintf("unknown example %q", example),
+					"use --example=revenue-ops"),
+			}})
+		}
+		if err := ex.RevenueOps(root); err != nil {
+			cleanup()
+			return err
+		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, fleetfile.GitTimeout)
 	defer cancel()

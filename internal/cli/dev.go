@@ -2,10 +2,14 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/DSamuelHodge/eve-fleet/internal/diag"
 	"github.com/DSamuelHodge/eve-fleet/internal/fleetfile"
@@ -86,6 +90,11 @@ func (g *globals) runDev(ctx context.Context) error {
 	if err := os.WriteFile(filepath.Join(dir, "dev.json"), body, 0o644); err != nil {
 		return err
 	}
+	if supervisor {
+		if err := exerciseSupervisor(root, doc, sha); err != nil {
+			return err
+		}
+	}
 	plain := fmt.Sprintf("dev %s %s supervisor=%v", doc.Metadata.Name, sha, supervisor)
 	if !supervisor {
 		plain += " (timeouts, retry, ack-before-close best-effort / audit-only)"
@@ -98,4 +107,59 @@ func (g *globals) runDev(ctx context.Context) error {
 		TopologyVersion: doc.Metadata.Version,
 		PlainOK:         plain,
 	})
+}
+
+func exerciseSupervisor(root string, doc *fleetfile.Document, sha string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	pending := []string{}
+	for _, e := range doc.Edges {
+		sum := sha256.Sum256([]byte(e.Contract))
+		hash := hex.EncodeToString(sum[:])
+		status := "ok"
+		attempts := 1
+		if e.OnFailure == "retry" {
+			attempts = 3
+		}
+		for i := 1; i <= attempts; i++ {
+			st := status
+			if e.OnFailure == "retry" && i < attempts {
+				st = "retry"
+			}
+			ev := fleetfile.AuditEvent{
+				Kind:            "handoff",
+				Fleet:           doc.Metadata.Name,
+				TopologyVersion: doc.Metadata.Version,
+				GitSHA:          sha,
+				EdgeName:        e.Name,
+				From:            e.From,
+				To:              e.To,
+				Actor:           e.From,
+				PayloadHash:     hash,
+				Status:          st,
+				RequiresAck:     e.RequiresAck,
+				Started:         now,
+				Completed:       now,
+				Message:         fmt.Sprintf("supervisor timeout=%s on_failure=%s attempt=%d", e.Timeout, e.OnFailure, i),
+			}
+			if e.RequiresAck && st == "ok" {
+				ev.Acked = false
+				ev.Status = "ack_pending"
+				pending = append(pending, e.Name)
+			}
+			if err := fleetfile.AppendAudit(root, ev); err != nil {
+				return err
+			}
+		}
+	}
+	if len(pending) > 0 {
+		return fleetfile.AppendAudit(root, fleetfile.AuditEvent{
+			Kind:            "outcome.blocked",
+			Fleet:           doc.Metadata.Name,
+			TopologyVersion: doc.Metadata.Version,
+			GitSHA:          sha,
+			Status:          "blocked",
+			Message:         "supervisor blocks outcome close until ack: " + strings.Join(pending, ","),
+		})
+	}
+	return nil
 }
