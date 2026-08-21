@@ -1,7 +1,6 @@
 package clitest
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -29,5 +28,4 @@ func TestHeadlessProducesNoANSI(t *testing.T) {
 			}
 		})
 	}
-	_ = filepath.Separator
 }
