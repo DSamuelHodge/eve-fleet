@@ -255,6 +255,10 @@ func Dirty(ctx context.Context, root string) (bool, error) {
 	return strings.TrimSpace(string(out)) != "", nil
 }
 
+func ShowFile(ctx context.Context, root, rev, path string) ([]byte, error) {
+	return gitCommand(ctx, root, "show", rev+":"+path).Output()
+}
+
 func RevParse(ctx context.Context, root string) (string, error) {
 	cmd := gitCommand(ctx, root, "rev-parse", "HEAD")
 	out, err := cmd.Output()
