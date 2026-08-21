@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -76,13 +77,31 @@ func (g *globals) runEdgeAdd(name, from, to, contract string) error {
 	if ds := fleetfile.ValidateEdges(doc.Agents, proposed); len(ds) > 0 {
 		return g.report(diag.Report{OK: false, Diagnostics: ds})
 	}
+	toolPath := filepathJoinEdge(root, edge)
 	if err := scaffold.EdgeTool(root, edge); err != nil {
-		return err
+		rule := "edge.tool.write"
+		if errors.Is(err, scaffold.ErrEdgeExists) {
+			rule = "edge.tool.exists"
+		}
+		return g.report(diag.Report{
+			OK: false,
+			Diagnostics: []diag.Diagnostic{
+				diag.Error(toolPath, rule, err.Error(),
+					"remove the existing generated tool or choose a new edge name"),
+			},
+		})
 	}
 	doc.Edges = proposed
 	if err := fleetfile.Save(root, doc); err != nil {
-		_ = os.Remove(filepathJoinEdge(root, edge))
-		return err
+		_ = os.Remove(toolPath)
+		return g.report(diag.Report{
+			OK: false,
+			Diagnostics: []diag.Diagnostic{
+				diag.Error(filepath.Join(root, fleetfile.FileName), "fleetfile.save",
+					err.Error(),
+					"fix permissions on Fleetfile and retry"),
+			},
+		})
 	}
 	return g.report(diag.Report{
 		OK:      true,

@@ -123,6 +123,89 @@ func TestEdgeAddRequiresContract(t *testing.T) {
 	}
 }
 
+func TestDoctorHandEditedInvalidEdges(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+		rule string
+	}{
+		{
+			name: "duplicate",
+			yaml: edgeFleetYAML("ops") + `  - name: dup
+    from: lead-intake
+    to: dedupe
+    contract: a
+  - name: dup
+    from: lead-intake
+    to: dedupe
+    contract: b
+`,
+			rule: "edge.name.unique",
+		},
+		{
+			name: "dangling",
+			yaml: edgeFleetYAML("ops") + `  - name: ghost
+    from: lead-intake
+    to: missing
+    contract: c
+`,
+			rule: "edge.endpoint",
+		},
+		{
+			name: "cycle",
+			yaml: edgeFleetYAML("ops") + `  - name: forward
+    from: lead-intake
+    to: dedupe
+    contract: c
+  - name: back
+    from: dedupe
+    to: lead-intake
+    contract: c
+`,
+			rule: "edge.cycle",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := seededFleet(t)
+			if err := os.WriteFile(filepath.Join(root, "Fleetfile"), []byte(tc.yaml), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			res := Run(t, root, nil, "doctor", "--json")
+			if res.Code == 0 {
+				t.Fatal("expected doctor failure")
+			}
+			if !strings.Contains(res.Stdout, tc.rule) {
+				t.Fatalf("expected %s in %s", tc.rule, res.Stdout)
+			}
+		})
+	}
+}
+
+func edgeFleetYAML(name string) string {
+	return `apiVersion: eve.fleet/v1
+kind: Fleet
+metadata:
+  name: ` + name + `
+  version: "0.1.0"
+agents:
+  lead-intake:
+    path: agents/lead-intake
+    role: parent
+    owns:
+      outcome: o
+      sla: s
+      completion: c
+  dedupe:
+    path: agents/dedupe
+    role: delegate
+    owns:
+      job: j
+      contract: c
+edges:
+`
+}
+
 func seededFleet(t *testing.T) string {
 	t.Helper()
 	root := initFleet(t, "ops")
