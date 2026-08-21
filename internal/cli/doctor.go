@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 
 	"github.com/DSamuelHodge/eve-fleet/internal/diag"
@@ -14,12 +15,12 @@ func newDoctorCmd(g *globals) *cobra.Command {
 		Short:   "Validate topology, paths, ownership, and git pin",
 		GroupID: groupInspect,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return g.runDoctor()
+			return g.runDoctor(cmd.Context())
 		},
 	}
 }
 
-func (g *globals) runDoctor() error {
+func (g *globals) runDoctor(ctx context.Context) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -46,9 +47,11 @@ func (g *globals) runDoctor() error {
 			},
 		})
 	}
-	ds := fleetfile.Validate(doc, root)
+	ctx, cancel := context.WithTimeout(ctx, fleetfile.GitTimeout)
+	defer cancel()
+	ds := fleetfile.Validate(ctx, doc, root)
 	ok := !diag.HasErrors(ds)
-	sha, _ := fleetfile.RevParse(root)
+	sha, _ := fleetfile.RevParse(ctx, root)
 	plain := "ok"
 	if ok {
 		plain = "ok " + doc.Metadata.Name + " " + doc.Metadata.Version + " " + sha

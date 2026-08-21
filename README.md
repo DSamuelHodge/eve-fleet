@@ -30,7 +30,7 @@ This is **not** a port of `eve-rails-cli` or `eve-rails-cli-go`.
 | Ceiling | 50 agents; cycles are a hard error |
 | TUI | Charm on TTY only; `--json` / `NO_COLOR` / CI are headless |
 
-Not implemented yet. Work from the spec.
+Ticket #2 (`init` + `doctor` on an empty fleet) is implemented. Later tickets are not.
 
 ## Develop
 

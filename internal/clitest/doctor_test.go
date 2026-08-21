@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -34,7 +33,7 @@ func TestDoctorJSONOnFreshFleet(t *testing.T) {
 	if payload.Name != "revenue-ops" || payload.TopologyVersion != "0.1.0" {
 		t.Fatalf("identity: %+v", payload)
 	}
-	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(payload.GitSHA) {
+	if !isCommitSHA(payload.GitSHA) {
 		t.Fatalf("gitSHA %q", payload.GitSHA)
 	}
 }

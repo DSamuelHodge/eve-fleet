@@ -6,15 +6,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sync"
 	"testing"
 )
 
 var (
-	binOnce sync.Once
-	binPath string
-	binErr  error
+	binOnce     sync.Once
+	binPath     string
+	binErr      error
+	commitSHARe = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
 )
 
 func moduleRoot(t *testing.T) string {
@@ -88,4 +90,8 @@ func Run(t *testing.T, dir string, extraEnv []string, args ...string) Result {
 		code = ee.ExitCode()
 	}
 	return Result{Code: code, Stdout: stdout.String(), Stderr: stderr.String()}
+}
+
+func isCommitSHA(s string) bool {
+	return commitSHARe.MatchString(s)
 }

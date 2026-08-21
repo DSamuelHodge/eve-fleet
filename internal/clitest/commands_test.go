@@ -42,11 +42,21 @@ func TestEveryCommandHasHelp(t *testing.T) {
 
 func TestGlobalFlagsAreRecognized(t *testing.T) {
 	dir := t.TempDir()
-	res := Run(t, dir, nil, "version", "--json", "--yes", "--non-interactive", "--revision=deadbeef", "--agent=lead-intake", "--shared")
-	if res.Code != 0 {
-		t.Fatalf("exit %d\nstderr:\n%s\nstdout:\n%s", res.Code, res.Stderr, res.Stdout)
+	flags := []string{"--json", "--yes", "--non-interactive", "--revision=deadbeef", "--agent=lead-intake", "--shared"}
+	cases := [][]string{
+		append([]string{"version"}, flags...),
+		append([]string{"init", "--help"}, flags...),
+		append([]string{"doctor", "--help"}, flags...),
 	}
-	if strings.Contains(res.Stderr, "unknown flag") {
-		t.Fatalf("global flags rejected: %s", res.Stderr)
+	for _, args := range cases {
+		t.Run(strings.Join(args[:2], " "), func(t *testing.T) {
+			res := Run(t, dir, nil, args...)
+			if res.Code != 0 {
+				t.Fatalf("exit %d\nstderr:\n%s\nstdout:\n%s", res.Code, res.Stderr, res.Stdout)
+			}
+			if strings.Contains(res.Stderr, "unknown flag") {
+				t.Fatalf("global flags rejected: %s", res.Stderr)
+			}
+		})
 	}
 }

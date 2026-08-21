@@ -5,10 +5,24 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
+
+func TestInitRejectsExistingDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "taken"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res := Run(t, dir, nil, "init", "taken")
+	if res.Code == 0 {
+		t.Fatal("expected failure for existing directory")
+	}
+	out := res.Stdout + res.Stderr
+	if !strings.Contains(out, "init.dir.exists") {
+		t.Fatalf("expected init.dir.exists, got:\n%s", out)
+	}
+}
 
 func TestInitRequiresName(t *testing.T) {
 	dir := t.TempDir()
@@ -46,7 +60,7 @@ func TestInitScaffoldsGitFleetAndDoctorPasses(t *testing.T) {
 	root := filepath.Join(dir, "revenue-ops")
 
 	sha := gitSHA(t, root)
-	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(sha) {
+	if !isCommitSHA(sha) {
 		t.Fatalf("expected 40-char commit SHA, got %q", sha)
 	}
 
@@ -121,7 +135,7 @@ func TestInitJSONIncludesGitSHA(t *testing.T) {
 	if payload.Name != "ops-core" {
 		t.Fatalf("name: %q", payload.Name)
 	}
-	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(payload.GitSHA) {
+	if !isCommitSHA(payload.GitSHA) {
 		t.Fatalf("gitSHA: %q", payload.GitSHA)
 	}
 }

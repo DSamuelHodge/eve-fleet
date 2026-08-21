@@ -1,12 +1,14 @@
 package fleetfile
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/DSamuelHodge/eve-fleet/internal/diag"
 	"gopkg.in/yaml.v3"
@@ -17,12 +19,14 @@ const (
 	Kind       = "Fleet"
 	FileName   = "Fleetfile"
 	MaxAgents  = 50
+	GitTimeout = 30 * time.Second
 )
 
 var (
 	dnsLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
-	semver   = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
-	gitSHA   = regexp.MustCompile(`^[0-9a-f]{40,64}$`)
+	// SemVer 2.0.0 core + optional pre-release and build metadata.
+	semver = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$`)
+	gitSHA = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
 )
 
 type Document struct {
@@ -142,7 +146,7 @@ func ValidDNSLabel(name string) bool {
 	return dnsLabel.MatchString(name)
 }
 
-func Validate(doc *Document, root string) []diag.Diagnostic {
+func Validate(ctx context.Context, doc *Document, root string) []diag.Diagnostic {
 	var ds []diag.Diagnostic
 	if doc.APIVersion != APIVersion {
 		ds = append(ds, diag.Error("Fleetfile", "fleetfile.apiVersion",
@@ -159,7 +163,7 @@ func Validate(doc *Document, root string) []diag.Diagnostic {
 			"metadata.name must be a DNS-label (lowercase letters, digits, hyphens)",
 			"use a name like revenue-ops"))
 	}
-	if doc.Metadata.Version == "" || !semver.MatchString(strings.TrimSpace(doc.Metadata.Version)) {
+	if doc.Metadata.Version == "" || !semver.MatchString(doc.Metadata.Version) {
 		ds = append(ds, diag.Error("metadata.version", "metadata.version",
 			"metadata.version must be human-managed semver",
 			`set metadata.version: "0.1.0"`))
@@ -193,7 +197,7 @@ func Validate(doc *Document, root string) []diag.Diagnostic {
 			`set runtime.git.pin: commit`))
 	}
 	if gitRequired {
-		ds = append(ds, validateGit(root)...)
+		ds = append(ds, validateGit(ctx, root)...)
 	}
 	if _, err := os.Stat(filepath.Join(root, "Fleet.lock")); err == nil {
 		ds = append(ds, diag.Error("Fleet.lock", "fleet.lock.forbidden",
@@ -208,13 +212,13 @@ func Validate(doc *Document, root string) []diag.Diagnostic {
 	return ds
 }
 
-func validateGit(root string) []diag.Diagnostic {
-	if !gitOK(root, "rev-parse", "--is-inside-work-tree") {
+func validateGit(ctx context.Context, root string) []diag.Diagnostic {
+	if !gitOK(ctx, root, "rev-parse", "--is-inside-work-tree") {
 		return []diag.Diagnostic{diag.Error(".", "runtime.git.required",
 			"fleet must be a git repository",
 			"run eve-fleet init <name> or git init")}
 	}
-	sha, err := RevParse(root)
+	sha, err := RevParse(ctx, root)
 	if err != nil || !gitSHA.MatchString(sha) {
 		return []diag.Diagnostic{diag.Error(".", "runtime.git.pin",
 			"git HEAD must be a real commit SHA",
@@ -223,9 +227,8 @@ func validateGit(root string) []diag.Diagnostic {
 	return nil
 }
 
-func RevParse(root string) (string, error) {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	cmd.Dir = root
+func RevParse(ctx context.Context, root string) (string, error) {
+	cmd := gitCommand(ctx, root, "rev-parse", "HEAD")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -233,10 +236,18 @@ func RevParse(root string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func gitOK(root string, args ...string) bool {
-	cmd := exec.Command("git", args...)
+func gitOK(ctx context.Context, root string, args ...string) bool {
+	return gitCommand(ctx, root, args...).Run() == nil
+}
+
+func gitCommand(ctx context.Context, root string, args ...string) *exec.Cmd {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = root
-	return cmd.Run() == nil
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	return cmd
 }
 
 func ScaffoldYAML(name string) []byte {
