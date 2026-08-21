@@ -24,28 +24,37 @@ func newEdgeCmd(g *globals) *cobra.Command {
 
 func newEdgeAddCmd(g *globals) *cobra.Command {
 	var (
-		name     string
-		from     string
-		to       string
-		contract string
+		name        string
+		from        string
+		to          string
+		contract    string
+		timeout     string
+		onFailure   string
+		requiresAck bool
 	)
 	cmd := &cobra.Command{
 		Use:   "add",
 		Short: "Add a named handoff edge",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return g.runEdgeAdd(name, from, to, contract)
+			return g.runEdgeAdd(fleetfile.EdgeSpec{
+				Name: name, From: from, To: to, Contract: contract,
+				Timeout: timeout, OnFailure: onFailure, RequiresAck: requiresAck,
+			})
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "", "unique edge name")
 	cmd.Flags().StringVar(&from, "from", "", "caller agent")
 	cmd.Flags().StringVar(&to, "to", "", "callee agent")
 	cmd.Flags().StringVar(&contract, "contract", "", "free-text handoff contract")
+	cmd.Flags().StringVar(&timeout, "timeout", "", "optional edge timeout (e.g. 15m)")
+	cmd.Flags().StringVar(&onFailure, "on-failure", "", "parent_handles, retry, escalate, or fail")
+	cmd.Flags().BoolVar(&requiresAck, "requires-ack", false, "parent must ack or reject after the edge completes")
 	return cmd
 }
 
-func (g *globals) runEdgeAdd(name, from, to, contract string) error {
-	edge := fleetfile.EdgeSpec{Name: name, From: from, To: to, Contract: contract}
+func (g *globals) runEdgeAdd(edge fleetfile.EdgeSpec) error {
+	name, from, to := edge.Name, edge.From, edge.To
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -74,7 +83,9 @@ func (g *globals) runEdgeAdd(name, from, to, contract string) error {
 		doc.Edges = []fleetfile.EdgeSpec{}
 	}
 	proposed := append(append([]fleetfile.EdgeSpec{}, doc.Edges...), edge)
-	if ds := fleetfile.ValidateEdges(doc.Agents, proposed); len(ds) > 0 {
+	probe := *doc
+	probe.Edges = proposed
+	if ds := fleetfile.ValidateEdges(&probe); diag.HasErrors(ds) {
 		return g.report(diag.Report{OK: false, Diagnostics: ds})
 	}
 	toolPath := filepathJoinEdge(root, edge)
@@ -93,7 +104,7 @@ func (g *globals) runEdgeAdd(name, from, to, contract string) error {
 	}
 	doc.Edges = proposed
 	if err := fleetfile.Save(root, doc); err != nil {
-		_ = os.Remove(toolPath)
+		removeEdgeArtifacts(root, edge)
 		return g.report(diag.Report{
 			OK: false,
 			Diagnostics: []diag.Diagnostic{
@@ -103,12 +114,23 @@ func (g *globals) runEdgeAdd(name, from, to, contract string) error {
 			},
 		})
 	}
+	plain := fmt.Sprintf("Added edge %s (%s -> %s)", name, from, to)
+	if edge.RequiresAck {
+		plain += " with ack/reject on the parent"
+	}
 	return g.report(diag.Report{
 		OK:      true,
 		Name:    name,
 		Path:    root,
-		PlainOK: fmt.Sprintf("Added edge %s (%s -> %s)", name, from, to),
+		PlainOK: plain,
 	})
+}
+
+func removeEdgeArtifacts(root string, edge fleetfile.EdgeSpec) {
+	dir := filepath.Join(root, "agents", edge.From, "agent", "tools", "fleet")
+	_ = os.Remove(filepath.Join(dir, "edge_"+edge.Name+".ts"))
+	_ = os.Remove(filepath.Join(dir, "ack_edge_"+edge.Name+".ts"))
+	_ = os.Remove(filepath.Join(dir, "reject_edge_"+edge.Name+".ts"))
 }
 
 func filepathJoinEdge(root string, edge fleetfile.EdgeSpec) string {
