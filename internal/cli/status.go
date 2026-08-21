@@ -2,15 +2,12 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/DSamuelHodge/eve-fleet/internal/diag"
 	"github.com/DSamuelHodge/eve-fleet/internal/fleetfile"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 func newStatusCmd(g *globals) *cobra.Command {
@@ -25,21 +22,9 @@ func newStatusCmd(g *globals) *cobra.Command {
 }
 
 func (g *globals) runStatus(ctx context.Context) error {
-	cwd, err := os.Getwd()
+	root, doc, _, _, err := g.findFleet(ctx)
 	if err != nil {
 		return err
-	}
-	root, err := fleetfile.FindRoot(cwd)
-	if err != nil {
-		return g.report(diag.Report{OK: false, Diagnostics: []diag.Diagnostic{
-			diag.Error(".", "fleetfile.missing", "no Fleetfile found in this directory or its parents", "run eve-fleet init <name>"),
-		}})
-	}
-	doc, _, err := fleetfile.Load(root)
-	if err != nil {
-		return g.report(diag.Report{OK: false, Diagnostics: []diag.Diagnostic{
-			diag.Error("Fleetfile", "fleetfile.parse", err.Error(), "fix YAML syntax in Fleetfile"),
-		}})
 	}
 	ctx, cancel := context.WithTimeout(ctx, fleetfile.GitTimeout)
 	defer cancel()
@@ -48,17 +33,30 @@ func (g *globals) runStatus(ctx context.Context) error {
 	if doc.Runtime != nil {
 		supervisor = doc.Runtime.Supervisor
 	}
-	plain := fmt.Sprintf("%s %s %s supervisor=%v", doc.Metadata.Name, doc.Metadata.Version, sha, supervisor)
+	dirty, _ := fleetfile.Dirty(ctx, root)
+	deployedSHA := ""
+	drift := false
+	if pin, err := readPin(root); err == nil {
+		deployedSHA = pin.GitSHA
+		if deployedSHA != sha {
+			drift = true
+		}
+		if raw, err := fleetfile.ShowFile(ctx, root, pin.GitSHA, fleetfile.FileName); err == nil {
+			var deployed fleetfile.Document
+			if yaml.Unmarshal(raw, &deployed) == nil {
+				if changed, _ := fleetfile.TopologyChanged(&deployed, doc); changed {
+					drift = true
+				}
+			}
+		}
+	}
+	if dirty {
+		drift = true
+	}
+	plain := fmt.Sprintf("%s topology=%s git=%s deployed=%s drift=%v supervisor=%v",
+		doc.Metadata.Name, doc.Metadata.Version, sha, deployedSHA, drift, supervisor)
 	if !supervisor {
 		plain += " degradation: timeouts, retry, ack-before-close are best-effort / audit-only"
-	}
-	if b, err := os.ReadFile(filepath.Join(root, ".eve-fleet", "dev.json")); err == nil {
-		var rec struct {
-			Degradation []string `json:"degradation"`
-		}
-		if json.Unmarshal(b, &rec) == nil && len(rec.Degradation) > 0 {
-			plain += "\n" + strings.Join(rec.Degradation, "; ")
-		}
 	}
 	return g.report(diag.Report{
 		OK:              true,
