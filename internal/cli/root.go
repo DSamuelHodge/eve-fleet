@@ -60,7 +60,7 @@ func newRoot(g *globals) *cobra.Command {
 	cmd.AddCommand(newDoctorCmd(g))
 	cmd.AddCommand(newAgentCmd(g))
 	cmd.AddCommand(newEdgeCmd(g))
-	cmd.AddCommand(newStubCmd(g, "shared", "Register shared skills, tools, or connections", "add", groupFleet))
+	cmd.AddCommand(newSharedCmd(g))
 	cmd.AddCommand(newStubCmd(g, "dev", "Run local multi-agent development", "", groupOperate))
 	cmd.AddCommand(newStubCmd(g, "build", "Validate and project deployable artifacts", "", groupOperate))
 	cmd.AddCommand(newStubCmd(g, "link", "Link a fleet deployment", "", groupOperate))
