@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/DSamuelHodge/eve-fleet/internal/diag"
 	"github.com/DSamuelHodge/eve-fleet/internal/fleetfile"
@@ -63,69 +65,21 @@ func newAgentAddCmd(g *globals) *cobra.Command {
 }
 
 func (g *globals) runAgentAdd(name, role, outcome, sla, completion, job, contract, model, description string) error {
-	if !fleetfile.ValidDNSLabel(name) {
-		return g.report(diag.Report{
-			OK: false,
-			Diagnostics: []diag.Diagnostic{
-				diag.Error("metadata.name", "agent.name",
-					"agent name must be a DNS-label (lowercase letters, digits, hyphens)",
-					"use a name like lead-intake"),
-			},
-		})
+	spec := fleetfile.AgentSpec{
+		Path:        fleetfile.AgentPath(name),
+		Role:        role,
+		Model:       model,
+		Description: description,
+		Owns: fleetfile.Owns{
+			Outcome:    outcome,
+			SLA:        sla,
+			Completion: completion,
+			Job:        job,
+			Contract:   contract,
+		},
 	}
-	if role != "parent" && role != "delegate" {
-		return g.report(diag.Report{
-			OK: false,
-			Diagnostics: []diag.Diagnostic{
-				diag.Error(".", "agent.role",
-					`role must be "parent" or "delegate"`,
-					"pass --role=parent or --role=delegate"),
-			},
-		})
-	}
-	if role == "parent" {
-		if outcome == "" || sla == "" || completion == "" {
-			return g.report(diag.Report{
-				OK: false,
-				Diagnostics: []diag.Diagnostic{
-					diag.Error(".", "agent.owns.parent",
-						"parent requires --outcome, --sla, and --completion",
-						"pass those flags; --yes/--non-interactive never prompt"),
-				},
-			})
-		}
-		if job != "" || contract != "" {
-			return g.report(diag.Report{
-				OK: false,
-				Diagnostics: []diag.Diagnostic{
-					diag.Error(".", "agent.owns.role",
-						"parent must not set --job or --contract",
-						"omit job/contract for a parent"),
-				},
-			})
-		}
-	}
-	if role == "delegate" {
-		if job == "" || contract == "" {
-			return g.report(diag.Report{
-				OK: false,
-				Diagnostics: []diag.Diagnostic{
-					diag.Error(".", "agent.owns.delegate",
-						"delegate requires --job and --contract",
-						"pass those flags; --yes/--non-interactive never prompt"),
-				},
-			})
-		}
-		if outcome != "" || sla != "" || completion != "" {
-			return g.report(diag.Report{
-				OK: false,
-				Diagnostics: []diag.Diagnostic{
-					diag.Error(".", "agent.owns.role",
-						"delegate must not set --outcome, --sla, or --completion",
-						"omit outcome/sla/completion for a delegate"),
-				},
-			})
-		}
+	if ds := fleetfile.ValidateSpec(name, spec); len(ds) > 0 {
+		return g.report(diag.Report{OK: false, Diagnostics: ds})
 	}
 
 	cwd, err := os.Getwd()
@@ -175,24 +129,22 @@ func (g *globals) runAgentAdd(name, role, outcome, sla, completion, job, contrac
 			},
 		})
 	}
-	spec := fleetfile.AgentSpec{
-		Path:        fleetfile.AgentPath(name),
-		Role:        role,
-		Model:       model,
-		Description: description,
-		Owns: fleetfile.Owns{
-			Outcome:    outcome,
-			SLA:        sla,
-			Completion: completion,
-			Job:        job,
-			Contract:   contract,
-		},
+	if err := scaffold.AgentTree(root, name, spec); err != nil {
+		if errors.Is(err, scaffold.ErrTreeExists) {
+			return g.report(diag.Report{
+				OK: false,
+				Diagnostics: []diag.Diagnostic{
+					diag.Error(filepath.Join("agents", name, "agent"), "agent.tree.exists",
+						err.Error(),
+						"remove the existing tree or pick a new agent name"),
+				},
+			})
+		}
+		return err
 	}
 	doc.Agents[name] = spec
 	if err := fleetfile.Save(root, doc); err != nil {
-		return err
-	}
-	if err := scaffold.AgentTree(root, name, spec); err != nil {
+		_ = os.RemoveAll(filepath.Join(root, "agents", name))
 		return err
 	}
 	return g.report(diag.Report{

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -268,14 +269,41 @@ func gitCommand(ctx context.Context, root string, args ...string) *exec.Cmd {
 
 func Save(root string, doc *Document) error {
 	path := filepath.Join(root, FileName)
-	f, err := os.Create(path)
+	f, err := os.CreateTemp(root, FileName+".tmp-*")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	tmp := f.Name()
+	ok := false
+	defer func() {
+		if f != nil {
+			_ = f.Close()
+		}
+		if !ok {
+			_ = os.Remove(tmp)
+		}
+	}()
 	enc := yaml.NewEncoder(f)
 	enc.SetIndent(2)
-	return enc.Encode(doc)
+	if err := enc.Encode(doc); err != nil {
+		return err
+	}
+	if err := enc.Close(); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		f = nil
+		return err
+	}
+	f = nil
+	if err := os.Chmod(tmp, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	ok = true
+	return nil
 }
 
 func AgentPath(name string) string {
@@ -283,48 +311,59 @@ func AgentPath(name string) string {
 }
 
 func validateAgents(agents map[string]AgentSpec) []diag.Diagnostic {
+	names := make([]string, 0, len(agents))
+	for name := range agents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
 	var ds []diag.Diagnostic
-	for name, spec := range agents {
-		base := "agents." + name
-		if !ValidDNSLabel(name) {
-			ds = append(ds, diag.Error(base, "agent.name",
-				"agent name must be a DNS-label (lowercase letters, digits, hyphens)",
-				"rename the agent to a DNS-label"))
+	for _, name := range names {
+		ds = append(ds, ValidateSpec(name, agents[name])...)
+	}
+	return ds
+}
+
+func ValidateSpec(name string, spec AgentSpec) []diag.Diagnostic {
+	var ds []diag.Diagnostic
+	base := "agents." + name
+	if !ValidDNSLabel(name) {
+		ds = append(ds, diag.Error(base, "agent.name",
+			"agent name must be a DNS-label (lowercase letters, digits, hyphens)",
+			"rename the agent to a DNS-label"))
+	}
+	want := AgentPath(name)
+	if spec.Path != want {
+		ds = append(ds, diag.Error(base+".path", "agent.path",
+			fmt.Sprintf("path must be %s", want),
+			fmt.Sprintf("set path: %s", want)))
+	}
+	switch spec.Role {
+	case "parent":
+		if spec.Owns.Outcome == "" || spec.Owns.SLA == "" || spec.Owns.Completion == "" {
+			ds = append(ds, diag.Error(base+".owns", "agent.owns.parent",
+				"parent requires owns.outcome, owns.sla, and owns.completion",
+				"set outcome, sla, and completion; do not set job or contract"))
 		}
-		want := AgentPath(name)
-		if spec.Path != want {
-			ds = append(ds, diag.Error(base+".path", "agent.path",
-				fmt.Sprintf("path must be %s", want),
-				fmt.Sprintf("set path: %s", want)))
+		if spec.Owns.Job != "" || spec.Owns.Contract != "" {
+			ds = append(ds, diag.Error(base+".owns", "agent.owns.role",
+				"parent must not declare owns.job or owns.contract",
+				"remove job/contract from the parent"))
 		}
-		switch spec.Role {
-		case "parent":
-			if spec.Owns.Outcome == "" || spec.Owns.SLA == "" || spec.Owns.Completion == "" {
-				ds = append(ds, diag.Error(base+".owns", "agent.owns.parent",
-					"parent requires owns.outcome, owns.sla, and owns.completion",
-					"set outcome, sla, and completion; do not set job or contract"))
-			}
-			if spec.Owns.Job != "" || spec.Owns.Contract != "" {
-				ds = append(ds, diag.Error(base+".owns", "agent.owns.role",
-					"parent must not declare owns.job or owns.contract",
-					"remove job/contract from the parent"))
-			}
-		case "delegate":
-			if spec.Owns.Job == "" || spec.Owns.Contract == "" {
-				ds = append(ds, diag.Error(base+".owns", "agent.owns.delegate",
-					"delegate requires owns.job and owns.contract",
-					"set job and contract; do not set outcome, sla, or completion"))
-			}
-			if spec.Owns.Outcome != "" || spec.Owns.SLA != "" || spec.Owns.Completion != "" {
-				ds = append(ds, diag.Error(base+".owns", "agent.owns.role",
-					"delegate must not declare owns.outcome, owns.sla, or owns.completion",
-					"remove outcome/sla/completion from the delegate"))
-			}
-		default:
-			ds = append(ds, diag.Error(base+".role", "agent.role",
-				`role must be "parent" or "delegate"`,
-				`set role: parent or role: delegate`))
+	case "delegate":
+		if spec.Owns.Job == "" || spec.Owns.Contract == "" {
+			ds = append(ds, diag.Error(base+".owns", "agent.owns.delegate",
+				"delegate requires owns.job and owns.contract",
+				"set job and contract; do not set outcome, sla, or completion"))
 		}
+		if spec.Owns.Outcome != "" || spec.Owns.SLA != "" || spec.Owns.Completion != "" {
+			ds = append(ds, diag.Error(base+".owns", "agent.owns.role",
+				"delegate must not declare owns.outcome, owns.sla, or owns.completion",
+				"remove outcome/sla/completion from the delegate"))
+		}
+	default:
+		ds = append(ds, diag.Error(base+".role", "agent.role",
+			`role must be "parent" or "delegate"`,
+			`set role: parent or role: delegate`))
 	}
 	return ds
 }

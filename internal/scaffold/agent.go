@@ -1,6 +1,7 @@
 package scaffold
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,8 +10,16 @@ import (
 	"github.com/DSamuelHodge/eve-fleet/internal/fleetfile"
 )
 
+var ErrTreeExists = errors.New("agent tree already exists")
+
 func AgentTree(root string, name string, spec fleetfile.AgentSpec) error {
 	base := filepath.Join(root, "agents", name, "agent")
+	agentFile := filepath.Join(base, "agent.ts")
+	if _, err := os.Stat(agentFile); err == nil {
+		return fmt.Errorf("%w: %s", ErrTreeExists, filepath.Join("agents", name, "agent"))
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	dirs := []string{
 		filepath.Join(base, "tools", "fleet"),
 		filepath.Join(base, "skills"),
@@ -21,7 +30,7 @@ func AgentTree(root string, name string, spec fleetfile.AgentSpec) error {
 			return err
 		}
 	}
-	if err := os.WriteFile(filepath.Join(base, "agent.ts"), []byte(agentTS()), 0o644); err != nil {
+	if err := os.WriteFile(agentFile, []byte(agentTS()), 0o644); err != nil {
 		return err
 	}
 	return os.WriteFile(filepath.Join(base, "instructions.md"), []byte(instructions(name, spec)), 0o644)

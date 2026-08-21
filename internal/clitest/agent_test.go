@@ -2,6 +2,7 @@ package clitest
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -138,17 +139,7 @@ func TestDoctorRejectsDelegateWithParentOwns(t *testing.T) {
 func TestDoctorRejectsFiftyFirstAgentUnderFiveSeconds(t *testing.T) {
 	root := initFleet(t, "scale")
 	ff := filepath.Join(root, "Fleetfile")
-	var b strings.Builder
-	b.WriteString("apiVersion: eve.fleet/v1\nkind: Fleet\nmetadata:\n  name: scale\n  version: \"0.1.0\"\nagents:\n")
-	for i := 0; i < 50; i++ {
-		name := "agent-" + two(i)
-		b.WriteString("  " + name + ":\n")
-		b.WriteString("    path: agents/" + name + "\n")
-		b.WriteString("    role: parent\n")
-		b.WriteString("    owns:\n      outcome: o\n      sla: s\n      completion: c\n")
-	}
-	b.WriteString("edges: []\nruntime:\n  isolation: strong\n  supervisor: false\n  hot_load:\n    agents: true\n    shared: true\n  git:\n    required: true\n    pin: commit\n")
-	if err := os.WriteFile(ff, []byte(b.String()), 0o644); err != nil {
+	if err := os.WriteFile(ff, []byte(scaleFleetfile("scale", 50)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()
@@ -169,16 +160,7 @@ func TestDoctorRejectsFiftyFirstAgentUnderFiveSeconds(t *testing.T) {
 		t.Fatalf("expected limit rule:\n%s%s", add.Stdout, add.Stderr)
 	}
 
-	var over strings.Builder
-	over.WriteString("apiVersion: eve.fleet/v1\nkind: Fleet\nmetadata:\n  name: scale\n  version: \"0.1.0\"\nagents:\n")
-	for i := 0; i < 51; i++ {
-		name := "agent-" + two(i)
-		over.WriteString("  " + name + ":\n")
-		over.WriteString("    path: agents/" + name + "\n")
-		over.WriteString("    role: parent\n")
-		over.WriteString("    owns:\n      outcome: o\n      sla: s\n      completion: c\n")
-	}
-	if err := os.WriteFile(ff, []byte(over.String()), 0o644); err != nil {
+	if err := os.WriteFile(ff, []byte(scaleFleetfile("scale", 51)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	doc51 := Run(t, root, nil, "doctor", "--json")
@@ -187,6 +169,34 @@ func TestDoctorRejectsFiftyFirstAgentUnderFiveSeconds(t *testing.T) {
 	}
 	if !strings.Contains(doc51.Stdout, "fleetfile.agents.limit") {
 		t.Fatalf("expected limit on doctor:\n%s", doc51.Stdout)
+	}
+}
+
+func TestAgentAddDoesNotOverwriteExistingTree(t *testing.T) {
+	root := initFleet(t, "keep")
+	tree := filepath.Join(root, "agents", "lead-intake", "agent")
+	if err := os.MkdirAll(tree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hand := []byte("HAND-WRITTEN\n")
+	if err := os.WriteFile(filepath.Join(tree, "agent.ts"), hand, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := Run(t, root, nil, "agent", "add", "lead-intake",
+		"--role=parent", "--outcome=o", "--sla=s", "--completion=c")
+	if res.Code == 0 {
+		t.Fatal("expected failure when tree exists")
+	}
+	out := res.Stdout + res.Stderr
+	if !strings.Contains(out, "agent.tree.exists") {
+		t.Fatalf("expected agent.tree.exists:\n%s", out)
+	}
+	got, err := os.ReadFile(filepath.Join(tree, "agent.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(hand) {
+		t.Fatalf("overwrote agent.ts: %q", got)
 	}
 }
 
@@ -209,6 +219,13 @@ func TestAgentAddJSON(t *testing.T) {
 	}
 }
 
-func two(i int) string {
-	return string('0'+byte(i/10)) + string('0'+byte(i%10))
+func scaleFleetfile(name string, n int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "apiVersion: eve.fleet/v1\nkind: Fleet\nmetadata:\n  name: %s\n  version: \"0.1.0\"\nagents:\n", name)
+	for i := 0; i < n; i++ {
+		an := fmt.Sprintf("agent-%02d", i)
+		fmt.Fprintf(&b, "  %s:\n    path: agents/%s\n    role: parent\n    owns:\n      outcome: o\n      sla: s\n      completion: c\n", an, an)
+	}
+	b.WriteString("edges: []\nruntime:\n  isolation: strong\n  supervisor: false\n  hot_load:\n    agents: true\n    shared: true\n  git:\n    required: true\n    pin: commit\n")
+	return b.String()
 }
