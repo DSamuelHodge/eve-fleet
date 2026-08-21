@@ -24,7 +24,8 @@ func (g *globals) loadValidated(ctx context.Context) (root string, doc *fleetfil
 				"run eve-fleet init <name>"),
 		}})
 	}
-	doc, _, err = fleetfile.Load(root)
+	var raw []byte
+	doc, raw, err = fleetfile.Load(root)
 	if err != nil {
 		return "", nil, nil, "", g.report(diag.Report{OK: false, Diagnostics: []diag.Diagnostic{
 			diag.Error("Fleetfile", "fleetfile.parse", err.Error(), "fix YAML syntax in Fleetfile"),
@@ -53,6 +54,6 @@ func (g *globals) loadValidated(ctx context.Context) (root string, doc *fleetfil
 				"commit changes, then retry"),
 		}})
 	}
-	ds = fleetfile.Validate(ctx, doc, root)
+	ds = fleetfile.Validate(ctx, doc, root, raw)
 	return root, doc, ds, sha, nil
 }
