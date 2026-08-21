@@ -1,0 +1,5 @@
+/eve-fleet
+/eve-fleet.exe
+*.test
+*.out
+dist/
