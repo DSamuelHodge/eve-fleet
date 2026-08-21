@@ -153,3 +153,36 @@ func TestSharedAddRejectsBadKind(t *testing.T) {
 		t.Fatalf("got %s%s", res.Stdout, res.Stderr)
 	}
 }
+
+func TestSharedToolReportsPerToolOverride(t *testing.T) {
+	root := initFleet(t, "override")
+	if res := Run(t, root, nil, "agent", "add", "lead-intake",
+		"--role=parent", "--outcome=o", "--sla=s", "--completion=c",
+		"--approver=human", "--approval-timeout=15m"); res.Code != 0 {
+		t.Fatal(res.Stderr)
+	}
+	ff := filepath.Join(root, "Fleetfile")
+	body, err := os.ReadFile(ff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	old := "approver: human\n      timeout: 15m"
+	neu := "approver: human\n      timeout: 15m\n      tools:\n        crm-write:\n          approver: lead-intake\n          timeout: 5m"
+	if !strings.Contains(text, old) {
+		t.Fatalf("unexpected Fleetfile:\n%s", text)
+	}
+	if err := os.WriteFile(ff, []byte(strings.Replace(text, old, neu, 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := Run(t, root, nil, "shared", "add", "tool", "crm-write", "--agent=lead-intake")
+	if res.Code != 0 {
+		t.Fatalf("%s%s", res.Stdout, res.Stderr)
+	}
+	if !strings.Contains(res.Stdout, "approver=lead-intake") || !strings.Contains(res.Stdout, "timeout=5m") {
+		t.Fatalf("expected per-tool override: %s", res.Stdout)
+	}
+	if strings.Contains(res.Stdout, "timeout=15m") {
+		t.Fatalf("reported agent-level timeout instead of override: %s", res.Stdout)
+	}
+}

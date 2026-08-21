@@ -148,7 +148,7 @@ func (g *globals) runSharedAdd(kind, name string) error {
 	}
 	plain := fmt.Sprintf("Registered shared %s %s", kind, name)
 	if kind == "tool" {
-		plain += " (" + g.sharedToolApproval(doc) + ")"
+		plain += " (" + g.sharedToolApproval(doc, name) + ")"
 	}
 	return g.report(diag.Report{
 		OK:      true,
@@ -158,7 +158,7 @@ func (g *globals) runSharedAdd(kind, name string) error {
 	})
 }
 
-func (g *globals) sharedToolApproval(doc *fleetfile.Document) string {
+func (g *globals) sharedToolApproval(doc *fleetfile.Document, name string) string {
 	if g.Agent == "" {
 		return "inherits the calling agent's approval policy at use time"
 	}
@@ -169,9 +169,19 @@ func (g *globals) sharedToolApproval(doc *fleetfile.Document) string {
 	if !ok || spec.ApprovalPolicy == nil {
 		return fmt.Sprintf("inherits %s approval policy at use time", g.Agent)
 	}
-	msg := fmt.Sprintf("caller %s approver=%s", g.Agent, spec.ApprovalPolicy.Approver)
-	if spec.ApprovalPolicy.Timeout != "" {
-		msg += " timeout=" + spec.ApprovalPolicy.Timeout
+	approver := spec.ApprovalPolicy.Approver
+	timeout := spec.ApprovalPolicy.Timeout
+	if override, ok := spec.ApprovalPolicy.Tools[name]; ok {
+		if override.Approver != "" {
+			approver = override.Approver
+		}
+		if override.Timeout != "" {
+			timeout = override.Timeout
+		}
+	}
+	msg := fmt.Sprintf("caller %s approver=%s", g.Agent, approver)
+	if timeout != "" {
+		msg += " timeout=" + timeout
 	}
 	return msg
 }

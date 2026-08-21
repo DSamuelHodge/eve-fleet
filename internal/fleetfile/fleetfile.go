@@ -161,7 +161,7 @@ func ValidDNSLabel(name string) bool {
 	return dnsLabel.MatchString(name)
 }
 
-func Validate(ctx context.Context, doc *Document, root string) []diag.Diagnostic {
+func Validate(ctx context.Context, doc *Document, root string, raw []byte) []diag.Diagnostic {
 	var ds []diag.Diagnostic
 	if doc.APIVersion != APIVersion {
 		ds = append(ds, diag.Error("Fleetfile", "fleetfile.apiVersion",
@@ -196,7 +196,7 @@ func Validate(ctx context.Context, doc *Document, root string) []diag.Diagnostic
 		ds = append(ds, validateApproval(doc.Agents)...)
 	}
 	ds = append(ds, validateEdges(doc.Agents, doc.Edges)...)
-	ds = append(ds, validateSecrets(root)...)
+	ds = append(ds, validateSecrets(raw)...)
 	rt := doc.Runtime
 	if rt == nil {
 		d := Defaults()
@@ -490,7 +490,7 @@ func validateApproval(agents map[string]AgentSpec) []diag.Diagnostic {
 		if spec.ApprovalPolicy == nil {
 			continue
 		}
-		ds = append(ds, checkApprover("agents."+name+".approval_policy", spec.ApprovalPolicy.Approver, spec.ApprovalPolicy.Timeout, name, agents)...)
+		ds = append(ds, checkApprover("agents."+name+".approval_policy", spec.ApprovalPolicy.Approver, spec.ApprovalPolicy.Timeout, agents)...)
 		toolNames := make([]string, 0, len(spec.ApprovalPolicy.Tools))
 		for tn := range spec.ApprovalPolicy.Tools {
 			toolNames = append(toolNames, tn)
@@ -498,19 +498,19 @@ func validateApproval(agents map[string]AgentSpec) []diag.Diagnostic {
 		sort.Strings(toolNames)
 		for _, tn := range toolNames {
 			ta := spec.ApprovalPolicy.Tools[tn]
-			ds = append(ds, checkApprover("agents."+name+".approval_policy.tools."+tn, ta.Approver, ta.Timeout, name, agents)...)
+			ds = append(ds, checkApprover("agents."+name+".approval_policy.tools."+tn, ta.Approver, ta.Timeout, agents)...)
 		}
 	}
 	return ds
 }
 
-func checkApprover(path, approver, timeout, self string, agents map[string]AgentSpec) []diag.Diagnostic {
+func checkApprover(path, approver, timeout string, agents map[string]AgentSpec) []diag.Diagnostic {
 	var ds []diag.Diagnostic
 	if approver == "" {
 		ds = append(ds, diag.Error(path+".approver", "approval.approver",
 			"approver is required when approval_policy is set",
 			`set approver to an agent name or "human"`))
-	} else if approver != "human" && approver != self && !agentExists(agents, approver) {
+	} else if approver != "human" && !agentExists(agents, approver) {
 		ds = append(ds, diag.Error(path+".approver", "approval.approver",
 			fmt.Sprintf("approver %q is not an agent in this fleet or \"human\"", approver),
 			`set approver to an existing agent name or "human"`))
@@ -531,17 +531,20 @@ func checkApprover(path, approver, timeout, self string, agents map[string]Agent
 
 var secretKey = regexp.MustCompile(`(?i)(?:^|[_-])(password|passwd|secret|token|api[_-]?key|private[_-]?key|credential|credentials|auth)(?:$|[_-])`)
 
-func validateSecrets(root string) []diag.Diagnostic {
-	data, err := os.ReadFile(filepath.Join(root, FileName))
-	if err != nil {
-		return nil
+func validateSecrets(raw []byte) []diag.Diagnostic {
+	if len(raw) == 0 {
+		return []diag.Diagnostic{diag.Error("Fleetfile", "fleetfile.secret.scan",
+			"Fleetfile bytes unavailable for secret scan",
+			"re-run doctor after saving the Fleetfile")}
 	}
 	var node yaml.Node
-	if err := yaml.Unmarshal(data, &node); err != nil {
-		return nil
+	if err := yaml.Unmarshal(raw, &node); err != nil {
+		return []diag.Diagnostic{diag.Error("Fleetfile", "fleetfile.parse",
+			err.Error(),
+			"fix YAML syntax in Fleetfile")}
 	}
 	var ds []diag.Diagnostic
-	walkSecrets(&node, "$", &ds)
+	walkSecrets(&node, "", &ds)
 	return ds
 }
 
@@ -558,7 +561,10 @@ func walkSecrets(n *yaml.Node, path string, ds *[]diag.Diagnostic) {
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k, v := n.Content[i], n.Content[i+1]
 			key := k.Value
-			child := path + "." + key
+			child := key
+			if path != "" {
+				child = path + "." + key
+			}
 			if secretKey.MatchString(key) {
 				*ds = append(*ds, diag.Error(child, "fleetfile.secret",
 					"Fleetfile must not hold secrets",
