@@ -95,3 +95,23 @@ func Run(t *testing.T, dir string, extraEnv []string, args ...string) Result {
 func isCommitSHA(s string) bool {
 	return commitSHARe.MatchString(s)
 }
+
+func commitAll(t *testing.T, dir, msg string) {
+	t.Helper()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=eve-fleet",
+			"GIT_AUTHOR_EMAIL=eve-fleet@local",
+			"GIT_COMMITTER_NAME=eve-fleet",
+			"GIT_COMMITTER_EMAIL=eve-fleet@local",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v (%s)", args, err, out)
+		}
+	}
+	run("add", "-A")
+	run("-c", "user.name=eve-fleet", "-c", "user.email=eve-fleet@local", "commit", "-m", msg)
+}

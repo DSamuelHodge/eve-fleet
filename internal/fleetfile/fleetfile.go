@@ -247,6 +247,14 @@ func validateGit(ctx context.Context, root string) []diag.Diagnostic {
 	return nil
 }
 
+func Dirty(ctx context.Context, root string) (bool, error) {
+	out, err := gitCommand(ctx, root, "status", "--porcelain", "--", ".", ":(exclude).eve-fleet").Output()
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(out)) != "", nil
+}
+
 func RevParse(ctx context.Context, root string) (string, error) {
 	cmd := gitCommand(ctx, root, "rev-parse", "HEAD")
 	out, err := cmd.Output()
