@@ -21,7 +21,8 @@ const (
 
 var (
 	dnsLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
-	semver   = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+([.-].*)?$`)
+	semver   = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
+	gitSHA   = regexp.MustCompile(`^[0-9a-f]{40,64}$`)
 )
 
 type Document struct {
@@ -186,6 +187,11 @@ func Validate(doc *Document, root string) []diag.Diagnostic {
 	if rt.Git.Required != nil {
 		gitRequired = *rt.Git.Required
 	}
+	if pin := rt.Git.Pin; pin != "" && pin != "commit" {
+		ds = append(ds, diag.Error("runtime.git.pin", "runtime.git.pin",
+			`git pin must be "commit"`,
+			`set runtime.git.pin: commit`))
+	}
 	if gitRequired {
 		ds = append(ds, validateGit(root)...)
 	}
@@ -209,7 +215,7 @@ func validateGit(root string) []diag.Diagnostic {
 			"run eve-fleet init <name> or git init")}
 	}
 	sha, err := RevParse(root)
-	if err != nil || !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(sha) {
+	if err != nil || !gitSHA.MatchString(sha) {
 		return []diag.Diagnostic{diag.Error(".", "runtime.git.pin",
 			"git HEAD must be a real commit SHA",
 			"commit the Fleetfile so revision is pinned")}

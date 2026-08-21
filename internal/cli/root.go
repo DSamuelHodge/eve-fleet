@@ -11,6 +11,12 @@ import (
 
 const version = "0.1.0"
 
+const (
+	groupFleet   = "fleet"
+	groupOperate = "operate"
+	groupInspect = "inspect"
+)
+
 type globals struct {
 	JSON           bool
 	Yes            bool
@@ -43,26 +49,33 @@ func newRoot(g *globals) *cobra.Command {
 	cmd.SetErr(g.stderr)
 	cmd.SetIn(g.stdin)
 
+	cmd.AddGroup(
+		&cobra.Group{ID: groupFleet, Title: "Fleet Setup"},
+		&cobra.Group{ID: groupOperate, Title: "Operate"},
+		&cobra.Group{ID: groupInspect, Title: "Inspect"},
+	)
+
 	cmd.AddCommand(newVersionCmd(g))
 	cmd.AddCommand(newInitCmd(g))
 	cmd.AddCommand(newDoctorCmd(g))
-	cmd.AddCommand(newStubCmd(g, "agent", "Add and inspect fleet agents", "add"))
-	cmd.AddCommand(newStubCmd(g, "edge", "Add and inspect named edges", "add"))
-	cmd.AddCommand(newStubCmd(g, "shared", "Register shared skills, tools, or connections", "add"))
-	cmd.AddCommand(newStubCmd(g, "dev", "Run local multi-agent development", ""))
-	cmd.AddCommand(newStubCmd(g, "build", "Validate and project deployable artifacts", ""))
-	cmd.AddCommand(newStubCmd(g, "link", "Link a fleet deployment", ""))
-	cmd.AddCommand(newStubCmd(g, "deploy", "Deploy a fleet revision", ""))
-	cmd.AddCommand(newStubCmd(g, "reload", "Hot-load implementation trees only", ""))
-	cmd.AddCommand(newStubCmd(g, "status", "Show topology version, SHAs, drift, supervisor state", ""))
-	cmd.AddCommand(newStubCmd(g, "audit", "Reconstruct the accountability chain", ""))
+	cmd.AddCommand(newStubCmd(g, "agent", "Add and inspect fleet agents", "add", groupFleet))
+	cmd.AddCommand(newStubCmd(g, "edge", "Add and inspect named edges", "add", groupFleet))
+	cmd.AddCommand(newStubCmd(g, "shared", "Register shared skills, tools, or connections", "add", groupFleet))
+	cmd.AddCommand(newStubCmd(g, "dev", "Run local multi-agent development", "", groupOperate))
+	cmd.AddCommand(newStubCmd(g, "build", "Validate and project deployable artifacts", "", groupOperate))
+	cmd.AddCommand(newStubCmd(g, "link", "Link a fleet deployment", "", groupOperate))
+	cmd.AddCommand(newStubCmd(g, "deploy", "Deploy a fleet revision", "", groupOperate))
+	cmd.AddCommand(newStubCmd(g, "reload", "Hot-load implementation trees only", "", groupOperate))
+	cmd.AddCommand(newStubCmd(g, "status", "Show topology version, SHAs, drift, supervisor state", "", groupInspect))
+	cmd.AddCommand(newStubCmd(g, "audit", "Reconstruct the accountability chain", "", groupInspect))
 	return cmd
 }
 
 func newVersionCmd(g *globals) *cobra.Command {
-	return &cobra.Command{
-		Use:   "version",
-		Short: "Print the eve-fleet CLI version",
+	cmd := &cobra.Command{
+		Use:     "version",
+		Short:   "Print the eve-fleet CLI version",
+		GroupID: groupInspect,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if g.JSON {
 				_, err := fmt.Fprintf(g.stdout, `{"version":%q}`+"\n", version)
@@ -72,12 +85,14 @@ func newVersionCmd(g *globals) *cobra.Command {
 			return err
 		},
 	}
+	return cmd
 }
 
-func newStubCmd(g *globals, use, short, child string) *cobra.Command {
+func newStubCmd(g *globals, use, short, child, group string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   use,
-		Short: short,
+		Use:     use,
+		Short:   short,
+		GroupID: group,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("%s is not implemented yet", use)
 		},

@@ -10,8 +10,9 @@ import (
 
 func newDoctorCmd(g *globals) *cobra.Command {
 	return &cobra.Command{
-		Use:   "doctor",
-		Short: "Validate topology, paths, ownership, and git pin",
+		Use:     "doctor",
+		Short:   "Validate topology, paths, ownership, and git pin",
+		GroupID: groupInspect,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return g.runDoctor()
 		},
@@ -48,6 +49,10 @@ func (g *globals) runDoctor() error {
 	ds := fleetfile.Validate(doc, root)
 	ok := !diag.HasErrors(ds)
 	sha, _ := fleetfile.RevParse(root)
+	plain := "ok"
+	if ok {
+		plain = "ok " + doc.Metadata.Name + " " + doc.Metadata.Version + " " + sha
+	}
 	return g.report(diag.Report{
 		OK:              ok,
 		Diagnostics:     ds,
@@ -55,5 +60,6 @@ func (g *globals) runDoctor() error {
 		Path:            root,
 		GitSHA:          sha,
 		TopologyVersion: doc.Metadata.Version,
+		PlainOK:         plain,
 	})
 }

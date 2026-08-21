@@ -35,6 +35,7 @@ type Report struct {
 	Path            string       `json:"path,omitempty"`
 	GitSHA          string       `json:"gitSHA,omitempty"`
 	TopologyVersion string       `json:"topologyVersion,omitempty"`
+	PlainOK         string       `json:"-"`
 }
 
 func (r Report) WriteJSON(w io.Writer) error {
@@ -47,15 +48,11 @@ func (r Report) WriteJSON(w io.Writer) error {
 
 func (r Report) WritePlain(w io.Writer) error {
 	if r.OK && len(r.Diagnostics) == 0 {
-		if r.Name != "" && r.GitSHA != "" {
-			_, err := fmt.Fprintf(w, "Initialized fleet %s (git SHA %s)\n", r.Name, r.GitSHA)
-			return err
+		msg := r.PlainOK
+		if msg == "" {
+			msg = "ok"
 		}
-		if r.Name != "" {
-			_, err := fmt.Fprintf(w, "ok %s %s %s\n", r.Name, r.TopologyVersion, r.GitSHA)
-			return err
-		}
-		_, err := fmt.Fprintln(w, "ok")
+		_, err := fmt.Fprintln(w, msg)
 		return err
 	}
 	var b strings.Builder

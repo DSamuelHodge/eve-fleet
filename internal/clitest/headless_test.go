@@ -20,6 +20,9 @@ func TestHeadlessProducesNoANSI(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			res := Run(t, root, tc.env, tc.args...)
+			if res.Code != 0 {
+				t.Fatalf("exit %d\n%s%s", res.Code, res.Stdout, res.Stderr)
+			}
 			out := res.Stdout + res.Stderr
 			if strings.Contains(out, "\x1b") {
 				t.Fatalf("ANSI found in headless output:\n%q", out)

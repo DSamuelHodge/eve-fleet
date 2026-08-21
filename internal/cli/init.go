@@ -12,14 +12,28 @@ import (
 )
 
 func newInitCmd(g *globals) *cobra.Command {
-	return &cobra.Command{
-		Use:   "init [name]",
-		Short: "Scaffold a fleet repository, Fleetfile, and git",
-		Args:  cobra.ExactArgs(1),
+	cmd := &cobra.Command{
+		Use:     "init <name>",
+		Short:   "Scaffold a fleet repository, Fleetfile, and git",
+		GroupID: groupFleet,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				return g.report(diag.Report{
+					OK: false,
+					Diagnostics: []diag.Diagnostic{
+						diag.Error(".", "init.name.required",
+							"init requires a fleet name",
+							"run eve-fleet init <name>"),
+					},
+				})
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return g.runInit(args[0])
 		},
 	}
+	return cmd
 }
 
 func (g *globals) runInit(name string) error {
@@ -84,10 +98,11 @@ func (g *globals) runInit(name string) error {
 		return err
 	}
 	return g.report(diag.Report{
-		OK:     true,
-		Name:   name,
-		Path:   root,
-		GitSHA: sha,
+		OK:      true,
+		Name:    name,
+		Path:    root,
+		GitSHA:  sha,
+		PlainOK: fmt.Sprintf("Initialized fleet %s (git SHA %s)", name, sha),
 	})
 }
 

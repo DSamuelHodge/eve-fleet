@@ -16,6 +16,10 @@ func TestInitRequiresName(t *testing.T) {
 	if res.Code == 0 {
 		t.Fatal("init without name should fail")
 	}
+	out := res.Stdout + res.Stderr
+	if !strings.Contains(out, "init.name.required") || !strings.Contains(out, "suggestion:") {
+		t.Fatalf("expected path/rule/suggestion diagnostic, got:\n%s", out)
+	}
 }
 
 func TestInitRejectsInvalidDNSLabel(t *testing.T) {
@@ -92,6 +96,12 @@ func TestInitScaffoldsGitFleetAndDoctorPasses(t *testing.T) {
 	doc := Run(t, root, nil, "doctor")
 	if doc.Code != 0 {
 		t.Fatalf("doctor exit %d\nstdout:\n%s\nstderr:\n%s", doc.Code, doc.Stdout, doc.Stderr)
+	}
+	if strings.Contains(doc.Stdout, "Initialized") {
+		t.Fatalf("doctor must not print init copy: %s", doc.Stdout)
+	}
+	if !strings.Contains(doc.Stdout, "ok") || !strings.Contains(doc.Stdout, "revenue-ops") {
+		t.Fatalf("doctor plain: %s", doc.Stdout)
 	}
 }
 
