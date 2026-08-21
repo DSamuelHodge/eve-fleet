@@ -78,7 +78,7 @@ func TestDoctorRejectsSecretsInFleetfile(t *testing.T) {
 	root := initFleet(t, "secrets")
 	ff := filepath.Join(root, "Fleetfile")
 	body, _ := os.ReadFile(ff)
-	mut := string(body) + "\nextra:\n  api_key: hunter2\n"
+	mut := string(body) + "\nextra:\n  api_key: hunter2\n  db_password: hunter2\n"
 	if err := os.WriteFile(ff, []byte(mut), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -88,6 +88,58 @@ func TestDoctorRejectsSecretsInFleetfile(t *testing.T) {
 	}
 	if !strings.Contains(res.Stdout, "fleetfile.secret") {
 		t.Fatalf("got %s", res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "db_password") {
+		t.Fatalf("expected compound key db_password: %s", res.Stdout)
+	}
+}
+
+func TestSharedToolReportsCallerApproval(t *testing.T) {
+	root := initFleet(t, "inherit")
+	if res := Run(t, root, nil, "agent", "add", "lead-intake",
+		"--role=parent", "--outcome=o", "--sla=s", "--completion=c",
+		"--approver=human", "--approval-timeout=15m"); res.Code != 0 {
+		t.Fatal(res.Stderr)
+	}
+	tool := Run(t, root, nil, "shared", "add", "tool", "crm-write", "--agent=lead-intake")
+	if tool.Code != 0 {
+		t.Fatal(tool.Stderr)
+	}
+	if !strings.Contains(tool.Stdout, "approver=human") || !strings.Contains(tool.Stdout, "timeout=15m") {
+		t.Fatalf("expected resolved caller policy: %s", tool.Stdout)
+	}
+	skill := Run(t, root, nil, "shared", "add", "skill", "lead-context")
+	if skill.Code != 0 {
+		t.Fatal(skill.Stderr)
+	}
+	if strings.Contains(skill.Stdout, "inherits") || strings.Contains(skill.Stdout, "approver=") {
+		t.Fatalf("skills must not claim approval inheritance: %s", skill.Stdout)
+	}
+}
+
+func TestSharedAddDoesNotRemoveExistingDir(t *testing.T) {
+	root := initFleet(t, "keep-dir")
+	target := filepath.Join(root, "shared", "tools", "crm-write")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(target, "keep.txt")
+	if err := os.WriteFile(marker, []byte("hand"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := Run(t, root, nil, "shared", "add", "tool", "crm-write")
+	if res.Code == 0 {
+		t.Fatal("expected existing dir to fail")
+	}
+	if !strings.Contains(res.Stdout+res.Stderr, "shared.dir.exists") {
+		t.Fatalf("got %s%s", res.Stdout, res.Stderr)
+	}
+	got, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hand" {
+		t.Fatalf("removed existing shared dir: %q", got)
 	}
 }
 

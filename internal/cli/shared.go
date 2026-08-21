@@ -107,19 +107,73 @@ func (g *globals) runSharedAdd(kind, name string) error {
 	}
 	setSharedList(doc.Shared, field, append(list, name))
 	target := filepath.Join(root, "shared", dir, name)
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		return err
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return g.report(diag.Report{
+			OK: false,
+			Diagnostics: []diag.Diagnostic{
+				diag.Error(filepath.Dir(target), "shared.dir.write", err.Error(),
+					"ensure the fleet root is writable"),
+			},
+		})
+	}
+	if err := os.Mkdir(target, 0o755); err != nil {
+		if os.IsExist(err) {
+			return g.report(diag.Report{
+				OK: false,
+				Diagnostics: []diag.Diagnostic{
+					diag.Error(target, "shared.dir.exists",
+						fmt.Sprintf("directory %s already exists", target),
+						"choose a new name or remove the directory"),
+				},
+			})
+		}
+		return g.report(diag.Report{
+			OK: false,
+			Diagnostics: []diag.Diagnostic{
+				diag.Error(target, "shared.dir.write", err.Error(),
+					"ensure the fleet root is writable"),
+			},
+		})
 	}
 	if err := fleetfile.Save(root, doc); err != nil {
 		_ = os.RemoveAll(target)
-		return err
+		return g.report(diag.Report{
+			OK: false,
+			Diagnostics: []diag.Diagnostic{
+				diag.Error(filepath.Join(root, fleetfile.FileName), "fleetfile.save",
+					err.Error(),
+					"fix permissions on Fleetfile and retry"),
+			},
+		})
+	}
+	plain := fmt.Sprintf("Registered shared %s %s", kind, name)
+	if kind == "tool" {
+		plain += " (" + g.sharedToolApproval(doc) + ")"
 	}
 	return g.report(diag.Report{
 		OK:      true,
 		Name:    name,
 		Path:    root,
-		PlainOK: fmt.Sprintf("Registered shared %s %s (inherits caller approval)", kind, name),
+		PlainOK: plain,
 	})
+}
+
+func (g *globals) sharedToolApproval(doc *fleetfile.Document) string {
+	if g.Agent == "" {
+		return "inherits the calling agent's approval policy at use time"
+	}
+	if doc.Agents == nil {
+		return fmt.Sprintf("inherits %s approval policy at use time", g.Agent)
+	}
+	spec, ok := doc.Agents[g.Agent]
+	if !ok || spec.ApprovalPolicy == nil {
+		return fmt.Sprintf("inherits %s approval policy at use time", g.Agent)
+	}
+	msg := fmt.Sprintf("caller %s approver=%s", g.Agent, spec.ApprovalPolicy.Approver)
+	if spec.ApprovalPolicy.Timeout != "" {
+		msg += " timeout=" + spec.ApprovalPolicy.Timeout
+	}
+	return msg
 }
 
 func sharedKind(kind string) (dir, field, err string) {
