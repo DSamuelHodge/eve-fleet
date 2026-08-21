@@ -61,12 +61,12 @@ func newRoot(g *globals) *cobra.Command {
 	cmd.AddCommand(newAgentCmd(g))
 	cmd.AddCommand(newEdgeCmd(g))
 	cmd.AddCommand(newSharedCmd(g))
-	cmd.AddCommand(newStubCmd(g, "dev", "Run local multi-agent development", "", groupOperate))
+	cmd.AddCommand(newDevCmd(g))
 	cmd.AddCommand(newBuildCmd(g))
 	cmd.AddCommand(newLinkCmd(g))
 	cmd.AddCommand(newDeployCmd(g))
 	cmd.AddCommand(newStubCmd(g, "reload", "Hot-load implementation trees only", "", groupOperate))
-	cmd.AddCommand(newStubCmd(g, "status", "Show topology version, SHAs, drift, supervisor state", "", groupInspect))
+	cmd.AddCommand(newStatusCmd(g))
 	cmd.AddCommand(newStubCmd(g, "audit", "Reconstruct the accountability chain", "", groupInspect))
 	return cmd
 }
