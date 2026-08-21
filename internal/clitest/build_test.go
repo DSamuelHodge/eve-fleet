@@ -15,6 +15,7 @@ func TestBuildIsByteStableAndPinsSHA(t *testing.T) {
 		"--name=dedupe_lead", "--from=lead-intake", "--to=dedupe", "--contract=c"); res.Code != 0 {
 		t.Fatal(res.Stderr)
 	}
+	commitAll(t, root, "add edge")
 	first := Run(t, root, nil, "build", "--json")
 	if first.Code != 0 {
 		t.Fatalf("build: %s%s", first.Stdout, first.Stderr)
@@ -56,6 +57,7 @@ func TestBuildIsByteStableAndPinsSHA(t *testing.T) {
 
 func TestLinkAndDeployRecordRevision(t *testing.T) {
 	root := seededFleet(t)
+	commitAll(t, root, "seed agents")
 	link := Run(t, root, nil, "link", "--json")
 	if link.Code != 0 {
 		t.Fatalf("link: %s%s", link.Stdout, link.Stderr)
@@ -92,5 +94,16 @@ func TestBuildFailsWhenDoctorFails(t *testing.T) {
 	res := Run(t, dir, nil, "build")
 	if res.Code == 0 {
 		t.Fatal("expected missing fleetfile")
+	}
+}
+
+func TestBuildRejectsDirtyWorkTree(t *testing.T) {
+	root := seededFleet(t)
+	res := Run(t, root, nil, "build", "--json")
+	if res.Code == 0 {
+		t.Fatal("expected dirty work tree to fail")
+	}
+	if !strings.Contains(res.Stdout+res.Stderr, "deploy.dirty") {
+		t.Fatalf("got %s%s", res.Stdout, res.Stderr)
 	}
 }

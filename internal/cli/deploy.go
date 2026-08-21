@@ -66,7 +66,9 @@ func (g *globals) runPin(ctx context.Context, kind string) error {
 	}
 	dir := filepath.Join(root, ".eve-fleet")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
+		return g.report(diag.Report{OK: false, Diagnostics: []diag.Diagnostic{
+			diag.Error(dir, "deploy.dir", err.Error(), "ensure .eve-fleet is writable"),
+		}})
 	}
 	body, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
@@ -75,7 +77,9 @@ func (g *globals) runPin(ctx context.Context, kind string) error {
 	body = append(body, '\n')
 	path := filepath.Join(dir, "deploy.json")
 	if err := os.WriteFile(path, body, 0o644); err != nil {
-		return err
+		return g.report(diag.Report{OK: false, Diagnostics: []diag.Diagnostic{
+			diag.Error(path, "deploy.write", err.Error(), "ensure .eve-fleet/deploy.json is writable"),
+		}})
 	}
 	return g.report(diag.Report{
 		OK:              true,

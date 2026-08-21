@@ -69,7 +69,9 @@ func (g *globals) runBuild(ctx context.Context) error {
 	body = append(body, '\n')
 	out := filepath.Join(dir, "manifest.json")
 	if err := os.WriteFile(out, body, 0o644); err != nil {
-		return err
+		return g.report(diag.Report{OK: false, Diagnostics: []diag.Diagnostic{
+			diag.Error(out, "build.write", err.Error(), "ensure .eve-fleet/build is writable"),
+		}})
 	}
 	return g.report(diag.Report{
 		OK:              true,
