@@ -54,10 +54,23 @@ type Shared struct {
 }
 
 type AgentSpec struct {
-	Path  string `yaml:"path"`
-	Role  string `yaml:"role"`
-	Owns  Owns   `yaml:"owns"`
-	Model string `yaml:"model,omitempty"`
+	Path           string          `yaml:"path"`
+	Role           string          `yaml:"role"`
+	Owns           Owns            `yaml:"owns"`
+	ApprovalPolicy *ApprovalPolicy `yaml:"approval_policy,omitempty"`
+	Model          string          `yaml:"model,omitempty"`
+	Description    string          `yaml:"description,omitempty"`
+}
+
+type ApprovalPolicy struct {
+	Approver string                  `yaml:"approver,omitempty"`
+	Timeout  string                  `yaml:"timeout,omitempty"`
+	Tools    map[string]ToolApproval `yaml:"tools,omitempty"`
+}
+
+type ToolApproval struct {
+	Approver string `yaml:"approver,omitempty"`
+	Timeout  string `yaml:"timeout,omitempty"`
 }
 
 type Owns struct {
@@ -176,6 +189,8 @@ func Validate(ctx context.Context, doc *Document, root string) []diag.Diagnostic
 		ds = append(ds, diag.Error("agents", "fleetfile.agents.limit",
 			fmt.Sprintf("at most %d agents", MaxAgents),
 			"remove agents until the fleet has 50 or fewer"))
+	} else {
+		ds = append(ds, validateAgents(doc.Agents)...)
 	}
 	rt := doc.Runtime
 	if rt == nil {
@@ -213,9 +228,9 @@ func Validate(ctx context.Context, doc *Document, root string) []diag.Diagnostic
 }
 
 func validateGit(ctx context.Context, root string) []diag.Diagnostic {
-	if !gitOK(ctx, root, "rev-parse", "--is-inside-work-tree") {
+	if !insideWorkTree(ctx, root) {
 		return []diag.Diagnostic{diag.Error(".", "runtime.git.required",
-			"fleet must be a git repository",
+			"fleet must be a git work tree (bare repositories are not valid)",
 			"run eve-fleet init <name> or git init")}
 	}
 	sha, err := RevParse(ctx, root)
@@ -236,8 +251,9 @@ func RevParse(ctx context.Context, root string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func gitOK(ctx context.Context, root string, args ...string) bool {
-	return gitCommand(ctx, root, args...).Run() == nil
+func insideWorkTree(ctx context.Context, root string) bool {
+	out, err := gitCommand(ctx, root, "rev-parse", "--is-inside-work-tree").Output()
+	return err == nil && strings.TrimSpace(string(out)) == "true"
 }
 
 func gitCommand(ctx context.Context, root string, args ...string) *exec.Cmd {
@@ -248,6 +264,69 @@ func gitCommand(ctx context.Context, root string, args ...string) *exec.Cmd {
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	return cmd
+}
+
+func Save(root string, doc *Document) error {
+	path := filepath.Join(root, FileName)
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	enc := yaml.NewEncoder(f)
+	enc.SetIndent(2)
+	return enc.Encode(doc)
+}
+
+func AgentPath(name string) string {
+	return "agents/" + name
+}
+
+func validateAgents(agents map[string]AgentSpec) []diag.Diagnostic {
+	var ds []diag.Diagnostic
+	for name, spec := range agents {
+		base := "agents." + name
+		if !ValidDNSLabel(name) {
+			ds = append(ds, diag.Error(base, "agent.name",
+				"agent name must be a DNS-label (lowercase letters, digits, hyphens)",
+				"rename the agent to a DNS-label"))
+		}
+		want := AgentPath(name)
+		if spec.Path != want {
+			ds = append(ds, diag.Error(base+".path", "agent.path",
+				fmt.Sprintf("path must be %s", want),
+				fmt.Sprintf("set path: %s", want)))
+		}
+		switch spec.Role {
+		case "parent":
+			if spec.Owns.Outcome == "" || spec.Owns.SLA == "" || spec.Owns.Completion == "" {
+				ds = append(ds, diag.Error(base+".owns", "agent.owns.parent",
+					"parent requires owns.outcome, owns.sla, and owns.completion",
+					"set outcome, sla, and completion; do not set job or contract"))
+			}
+			if spec.Owns.Job != "" || spec.Owns.Contract != "" {
+				ds = append(ds, diag.Error(base+".owns", "agent.owns.role",
+					"parent must not declare owns.job or owns.contract",
+					"remove job/contract from the parent"))
+			}
+		case "delegate":
+			if spec.Owns.Job == "" || spec.Owns.Contract == "" {
+				ds = append(ds, diag.Error(base+".owns", "agent.owns.delegate",
+					"delegate requires owns.job and owns.contract",
+					"set job and contract; do not set outcome, sla, or completion"))
+			}
+			if spec.Owns.Outcome != "" || spec.Owns.SLA != "" || spec.Owns.Completion != "" {
+				ds = append(ds, diag.Error(base+".owns", "agent.owns.role",
+					"delegate must not declare owns.outcome, owns.sla, or owns.completion",
+					"remove outcome/sla/completion from the delegate"))
+			}
+		default:
+			ds = append(ds, diag.Error(base+".role", "agent.role",
+				`role must be "parent" or "delegate"`,
+				`set role: parent or role: delegate`))
+		}
+	}
+	return ds
 }
 
 func ScaffoldYAML(name string) []byte {
