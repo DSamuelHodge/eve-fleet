@@ -107,7 +107,15 @@ func (g *globals) runInit(ctx context.Context, name string) error {
 	}
 	sha, err := fleetfile.RevParse(ctx, root)
 	if err != nil {
-		return err
+		cleanup()
+		return g.report(diag.Report{
+			OK: false,
+			Diagnostics: []diag.Diagnostic{
+				diag.Error(".", "runtime.git.required",
+					fmt.Sprintf("git revision lookup failed: %v", err),
+					"retry eve-fleet init after resolving the git error"),
+			},
+		})
 	}
 	return g.report(diag.Report{
 		OK:      true,
