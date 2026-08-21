@@ -31,3 +31,14 @@ This is **not** a port of `eve-rails-cli` or `eve-rails-cli-go`.
 | TUI | Charm on TTY only; `--json` / `NO_COLOR` / CI are headless |
 
 Not implemented yet. Work from the spec.
+
+## Develop
+
+```bash
+go test ./internal/clitest
+go build -o eve-fleet ./cmd/eve-fleet
+./eve-fleet init revenue-ops
+cd revenue-ops && ../eve-fleet doctor
+```
+
+CLI tests invoke the `eve-fleet` binary (the spec seam). Ticket #2 is `init` + `doctor` on an empty fleet.
