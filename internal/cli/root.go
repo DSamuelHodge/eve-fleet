@@ -65,7 +65,7 @@ func newRoot(g *globals) *cobra.Command {
 	cmd.AddCommand(newBuildCmd(g))
 	cmd.AddCommand(newLinkCmd(g))
 	cmd.AddCommand(newDeployCmd(g))
-	cmd.AddCommand(newStubCmd(g, "reload", "Hot-load implementation trees only", "", groupOperate))
+	cmd.AddCommand(newReloadCmd(g))
 	cmd.AddCommand(newStatusCmd(g))
 	cmd.AddCommand(newStubCmd(g, "audit", "Reconstruct the accountability chain", "", groupInspect))
 	return cmd
