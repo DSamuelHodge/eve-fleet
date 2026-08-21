@@ -23,8 +23,15 @@ func EdgeTool(root string, edge fleetfile.EdgeSpec) error {
 	if err := writeExclusive(path, rel, []byte(edgeToolTS(edge))); err != nil {
 		return err
 	}
-	if edge.RequiresAck {
-		return AckRejectTools(root, edge)
+	if !edge.RequiresAck {
+		return nil
+	}
+	if err := AckRejectTools(root, edge); err != nil {
+		_ = os.Remove(path)
+		dir := filepath.Join(root, "agents", edge.From, "agent", "tools", "fleet")
+		_ = os.Remove(filepath.Join(dir, "ack_edge_"+edge.Name+".ts"))
+		_ = os.Remove(filepath.Join(dir, "reject_edge_"+edge.Name+".ts"))
+		return err
 	}
 	return nil
 }
