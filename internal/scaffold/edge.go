@@ -19,14 +19,47 @@ func EdgeTool(root string, edge fleetfile.EdgeSpec) error {
 		return err
 	}
 	path := filepath.Join(dir, "edge_"+edge.Name+".ts")
+	rel := filepath.Join("agents", edge.From, "agent", "tools", "fleet", "edge_"+edge.Name+".ts")
+	if err := writeExclusive(path, rel, []byte(edgeToolTS(edge))); err != nil {
+		return err
+	}
+	if !edge.RequiresAck {
+		return nil
+	}
+	if err := AckRejectTools(root, edge); err != nil {
+		_ = os.Remove(path)
+		return err
+	}
+	return nil
+}
+
+func AckRejectTools(root string, edge fleetfile.EdgeSpec) error {
+	dir := filepath.Join(root, "agents", edge.From, "agent", "tools", "fleet")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	ackRel := filepath.Join("agents", edge.From, "agent", "tools", "fleet", "ack_edge_"+edge.Name+".ts")
+	ackPath := filepath.Join(dir, "ack_edge_"+edge.Name+".ts")
+	if err := writeExclusive(ackPath, ackRel, []byte(ackToolTS(edge))); err != nil {
+		return err
+	}
+	rejRel := filepath.Join("agents", edge.From, "agent", "tools", "fleet", "reject_edge_"+edge.Name+".ts")
+	if err := writeExclusive(filepath.Join(dir, "reject_edge_"+edge.Name+".ts"), rejRel, []byte(rejectToolTS(edge))); err != nil {
+		_ = os.Remove(ackPath)
+		return err
+	}
+	return nil
+}
+
+func writeExclusive(path, rel string, body []byte) error {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
-			return fmt.Errorf("%w: %s", ErrEdgeExists, filepath.Join("agents", edge.From, "agent", "tools", "fleet", "edge_"+edge.Name+".ts"))
+			return fmt.Errorf("%w: %s", ErrEdgeExists, rel)
 		}
 		return err
 	}
-	_, werr := f.Write([]byte(edgeToolTS(edge)))
+	_, werr := f.Write(body)
 	cerr := f.Close()
 	if werr != nil {
 		return werr
@@ -34,8 +67,55 @@ func EdgeTool(root string, edge fleetfile.EdgeSpec) error {
 	return cerr
 }
 
+func ackToolTS(edge fleetfile.EdgeSpec) string {
+	desc := fmt.Sprintf("Acknowledge completed edge %q. Callable only after edge_%s has completed. Optional reason.", edge.Name, edge.Name)
+	if edge.Timeout != "" {
+		desc += " Timeout without ack/reject fails the edge and the parent outcome."
+	}
+	return ackRejectBody(desc, "acked")
+}
+
+func rejectToolTS(edge fleetfile.EdgeSpec) string {
+	desc := fmt.Sprintf("Reject completed edge %q. Callable only after edge_%s has completed. Optional reason. Reject fails the parent outcome.", edge.Name, edge.Name)
+	if edge.Timeout != "" {
+		desc += " Timeout without ack/reject fails the edge and the parent outcome."
+	}
+	return ackRejectBody(desc, "rejected")
+}
+
+func ackRejectBody(desc, action string) string {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(desc); err != nil {
+		buf.Reset()
+		buf.WriteString(`"handoff"`)
+	}
+	descLit := bytes.TrimSpace(buf.Bytes())
+	return fmt.Sprintf(`import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description: %s,
+  inputSchema: z.object({
+    reason: z.string().optional(),
+  }),
+  async execute(input) {
+    return { status: "ok" as const, result: { action: %q, reason: input.reason } };
+  },
+});
+`, descLit, action)
+}
+
 func edgeToolTS(edge fleetfile.EdgeSpec) string {
-	desc := fmt.Sprintf("Handoff edge %q from %s to %s. Contract: %s", edge.Name, edge.From, edge.To, edge.Contract)
+	onf := edge.OnFailure
+	if onf == "" {
+		onf = "parent_handles"
+	}
+	desc := fmt.Sprintf("Handoff edge %q from %s to %s. Contract: %s. on_failure=%s (retry without a supervisor degrades to parent_handles).", edge.Name, edge.From, edge.To, edge.Contract, onf)
+	if edge.RequiresAck && edge.Timeout != "" {
+		desc += " Timeout without ack/reject fails the edge and the parent outcome."
+	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)

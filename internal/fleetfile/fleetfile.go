@@ -195,7 +195,7 @@ func Validate(ctx context.Context, doc *Document, root string, raw []byte) []dia
 		ds = append(ds, validateAgents(doc.Agents)...)
 		ds = append(ds, validateApproval(doc.Agents)...)
 	}
-	ds = append(ds, validateEdges(doc.Agents, doc.Edges)...)
+	ds = append(ds, ValidateEdges(doc)...)
 	ds = append(ds, validateSecrets(raw)...)
 	rt := doc.Runtime
 	if rt == nil {
@@ -376,11 +376,20 @@ func ValidEdgeName(name string) bool {
 	return len(name) > 0 && len(name) <= 63 && edgeName.MatchString(name)
 }
 
-func ValidateEdges(agents map[string]AgentSpec, edges []EdgeSpec) []diag.Diagnostic {
-	return validateEdges(agents, edges)
+func ValidateEdges(doc *Document) []diag.Diagnostic {
+	supervisor := false
+	if doc != nil && doc.Runtime != nil {
+		supervisor = doc.Runtime.Supervisor
+	}
+	var agents map[string]AgentSpec
+	var edges []EdgeSpec
+	if doc != nil {
+		agents, edges = doc.Agents, doc.Edges
+	}
+	return validateEdges(agents, edges, supervisor)
 }
 
-func validateEdges(agents map[string]AgentSpec, edges []EdgeSpec) []diag.Diagnostic {
+func validateEdges(agents map[string]AgentSpec, edges []EdgeSpec, supervisor bool) []diag.Diagnostic {
 	var ds []diag.Diagnostic
 	seen := map[string]int{}
 	for i, e := range edges {
@@ -410,6 +419,32 @@ func validateEdges(agents map[string]AgentSpec, edges []EdgeSpec) []diag.Diagnos
 			ds = append(ds, diag.Error(base+".to", "edge.endpoint",
 				fmt.Sprintf("to %q does not name an existing agent", e.To),
 				"set to to an agent declared in agents:"))
+		}
+		switch e.OnFailure {
+		case "", "parent_handles", "retry", "escalate", "fail":
+		default:
+			ds = append(ds, diag.Error(base+".on_failure", "edge.on_failure",
+				`on_failure must be parent_handles, retry, escalate, or fail`,
+				`set on_failure: parent_handles`))
+		}
+		if e.Timeout != "" {
+			if _, err := time.ParseDuration(e.Timeout); err != nil {
+				ds = append(ds, diag.Error(base+".timeout", "edge.timeout",
+					"timeout must be a Go duration such as 15m or 1h",
+					`set timeout: "15m"`))
+			}
+		}
+		if e.RequiresAck {
+			if spec, ok := agents[e.From]; !ok || spec.Role != "parent" {
+				ds = append(ds, diag.Error(base+".requires_ack", "edge.requires_ack.parent",
+					"requires_ack is only valid on edges from a parent",
+					"set from to a parent agent or disable requires_ack"))
+			}
+		}
+		if e.OnFailure == "retry" && !supervisor {
+			ds = append(ds, diag.Note(base+".on_failure", "edge.retry.degraded",
+				"retry without a supervisor degrades to parent_handles",
+				"set runtime.supervisor: true for supervisor-backed retry"))
 		}
 	}
 	if cycle := findCycle(edges, agents); len(cycle) > 0 {
